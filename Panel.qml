@@ -3,7 +3,7 @@ import qs.Commons
 import qs.Ui
 import "Model.js" as Model
 
-// Bar button + popup for touchpad behaviour and finger-swipe gestures.
+// Bar button + popup for libinput touchpad behaviour.
 // Level 1: everything here is a plain libinput / Hyprland setting, applied
 // live with `hyprctl eval "hl.config{...}"` and persisted to a managed Lua file.
 // No daemon, no elevated permissions.
@@ -22,10 +22,7 @@ Panel {
   property string notice: ""
 
   // Flat list of things the panel cursor can land on.
-  //   { kind: "toggle", key, option, label }
-  //   { kind: "scroll" }
-  //   { kind: "gesture", key }
-  //   { kind: "fingers", key }
+  //   { kind: "toggle", key, field, label }   { kind: "scroll" }
   readonly property var navItems: {
     var items = []
     for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++) {
@@ -33,16 +30,7 @@ Panel {
       items.push({ kind: "toggle", key: t.key, field: t.field, label: t.label })
     }
     items.push({ kind: "scroll" })
-    for (var g = 0; g < Model.GESTURES.length; g++) {
-      items.push({ kind: "gesture", key: Model.GESTURES[g].key })
-      items.push({ kind: "fingers", key: Model.GESTURES[g].key })
-    }
     return items
-  }
-
-  function gestureDef(key) {
-    for (var i = 0; i < Model.GESTURES.length; i++) if (Model.GESTURES[i].key === key) return Model.GESTURES[i]
-    return null
   }
 
   function moveCursor(delta) {
@@ -57,8 +45,6 @@ Panel {
     if (!item) return
     if (item.kind === "toggle") setToggle(item.key, item.field, !Model.effectiveToggle(cfg, sync.liveValues, item.key))
     else if (item.kind === "scroll") cycleScroll()
-    else if (item.kind === "gesture") setGesture(item.key, !(cfg.gestures[item.key] && cfg.gestures[item.key].enabled))
-    else if (item.kind === "fingers") cycleFingers(item.key)
   }
 
   // ------------------------------------------------------------- mutations
@@ -80,42 +66,6 @@ Panel {
     flash("Scroll: " + next)
   }
 
-  function setGesture(key, enabled) {
-    var def = gestureDef(key)
-    if (!def) return
-    var fingers = (cfg.gestures[key] && cfg.gestures[key].fingers) || def.defaultFingers
-    store.mutate(function (d) {
-      if (!d.gestures[key]) d.gestures[key] = {}
-      d.gestures[key].enabled = enabled
-      d.gestures[key].fingers = fingers
-    })
-    sync.writeManaged(store.config)
-    if (enabled) {
-      sync.runOne(Model.gestureEvalArgs(fingers, def.direction, def.action))
-      flash("Swipe on")
-    } else {
-      // A registered gesture can't be un-registered at runtime; reload the
-      // config (the managed file no longer emits it) to drop it.
-      sync.runOne(["hyprctl", "reload"])
-      flash("Swipe off (reloaded)")
-    }
-  }
-
-  function cycleFingers(key) {
-    var def = gestureDef(key)
-    if (!def) return
-    var cur = (cfg.gestures[key] && cfg.gestures[key].fingers) || def.defaultFingers
-    var choices = def.fingerChoices
-    var next = choices[(choices.indexOf(cur) + 1) % choices.length]
-    var wasEnabled = cfg.gestures[key] && cfg.gestures[key].enabled
-    store.mutate(function (d) {
-      if (!d.gestures[key]) d.gestures[key] = { enabled: false }
-      d.gestures[key].fingers = next
-    })
-    sync.writeManaged(store.config)
-    if (wasEnabled) sync.runOne(["hyprctl", "reload"])
-    flash(next + "-finger")
-  }
 
   function flash(text) {
     notice = text
@@ -162,7 +112,7 @@ Panel {
           color: "transparent"
           border.width: Math.max(1, Math.round(width * 0.09))
           border.color: button.foreground
-          opacity: Model.anyGestureEnabled(root.cfg) ? 1.0 : 0.75
+          opacity: Model.summaryLine(root.cfg) !== "defaults" ? 1.0 : 0.78
 
           Rectangle {
             anchors.horizontalCenter: parent.horizontalCenter
@@ -318,90 +268,12 @@ Panel {
 
         PanelSeparator { foreground: root.fg }
 
-        // ---- gestures ----
-        PanelSectionHeader { text: "FINGER SWIPES"; foreground: root.fg; fontFamily: root.fontFamily }
-
-        Repeater {
-          model: Model.GESTURES
-          Column {
-            required property var modelData
-            width: column.width
-            spacing: Style.space(4)
-            Row {
-              width: parent.width
-              spacing: Style.space(8)
-              Text {
-                width: parent.width - gBtn.width - parent.spacing
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.label
-                color: root.fg
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-              }
-              Button {
-                id: gBtn
-                text: (root.cfg.gestures[modelData.key] && root.cfg.gestures[modelData.key].enabled) ? "On" : "Off"
-                fontSize: Style.font.bodySmall
-                bordered: true
-                foreground: root.fg
-                fontFamily: root.fontFamily
-                active: root.cfg.gestures[modelData.key] && root.cfg.gestures[modelData.key].enabled === true
-                hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
-                  && root.navItems[root.cursorIndex].kind === "gesture"
-                  && root.navItems[root.cursorIndex].key === modelData.key
-                onClicked: root.setGesture(modelData.key, !(root.cfg.gestures[modelData.key] && root.cfg.gestures[modelData.key].enabled))
-                onHovered: function (h) {
-                  if (h) {
-                    root.cursorActive = true
-                    for (var i = 0; i < root.navItems.length; i++)
-                      if (root.navItems[i].kind === "gesture" && root.navItems[i].key === modelData.key) root.cursorIndex = i
-                  }
-                }
-              }
-            }
-            Row {
-              width: parent.width
-              spacing: Style.space(8)
-              Text {
-                width: parent.width - fBtn.width - parent.spacing
-                anchors.verticalCenter: parent.verticalCenter
-                text: "Fingers"
-                color: Qt.darker(root.fg, 1.3)
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
-              }
-              Button {
-                id: fBtn
-                text: String((root.cfg.gestures[modelData.key] && root.cfg.gestures[modelData.key].fingers) || modelData.defaultFingers)
-                fontSize: Style.font.caption
-                bordered: true
-                foreground: root.fg
-                fontFamily: root.fontFamily
-                hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
-                  && root.navItems[root.cursorIndex].kind === "fingers"
-                  && root.navItems[root.cursorIndex].key === modelData.key
-                onClicked: root.cycleFingers(modelData.key)
-                onHovered: function (h) {
-                  if (h) {
-                    root.cursorActive = true
-                    for (var i = 0; i < root.navItems.length; i++)
-                      if (root.navItems[i].kind === "fingers" && root.navItems[i].key === modelData.key) root.cursorIndex = i
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        PanelSeparator { foreground: root.fg }
-
         Text {
           width: parent.width
           wrapMode: Text.WordWrap
           text: sync.lastError !== ""
             ? ("hyprctl: " + sync.lastError)
-            : "Taptic Engine strength and custom gestures come in a later version."
+            : "Finger-swipe gestures, Taptic Engine strength, and custom gestures come in a later version."
           color: sync.lastError !== "" ? Color.urgent : Qt.darker(root.fg, 1.5)
           font.family: root.fontFamily
           font.pixelSize: Style.font.caption

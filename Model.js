@@ -33,8 +33,14 @@ var SCROLL_STOPS = [
   { key: "fast",   value: 0.8, label: "Fast" }
 ]
 
-// Finger-swipe gesture (Hyprland 0.51+ `hl.gesture{ fingers, direction, action }`).
-var GESTURES = [
+// Finger-swipe gestures are DEFERRED to v0.2. Runtime `hl.gesture(...)` is
+// sticky — `hyprctl reload` does not remove it (only a full Hyprland restart
+// does) — and it errors ("overshadowed") if a gesture for that direction
+// already exists, including one the user set in their own input.lua. A clean
+// on/off toggle needs a register/unregister story we don't have yet. The
+// catalogue is kept here for v0.2; nothing wires it up in v0.1.
+var GESTURES = []
+var PLANNED_GESTURES = [
   {
     key: "workspaceSwipe",
     label: "Swipe to switch workspace",
@@ -242,6 +248,7 @@ if (typeof module !== "undefined") {
     SCROLL_FIELD: SCROLL_FIELD,
     SCROLL_OPTION: SCROLL_OPTION,
     GESTURES: GESTURES,
+    PLANNED_GESTURES: PLANNED_GESTURES,
     defaultConfig: defaultConfig,
     normalizeConfig: normalizeConfig,
     parseGetOption: parseGetOption,

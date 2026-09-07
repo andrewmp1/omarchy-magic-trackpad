@@ -1,0 +1,12 @@
+{
+  "name": "omarchy-magic-trackpad",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Omarchy bar widget for trackpad behaviour and finger-swipe gestures",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test tests/model.test.js tests/manifest.test.js tests/lua.test.js",
+    "test:contract": "node --test tests/hypr-contract.test.js",
+    "check": "bash scripts/check.sh"
+  }
+}

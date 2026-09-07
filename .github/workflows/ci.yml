@@ -1,0 +1,44 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Lua (for generated-config syntax checks)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          sudo ln -sf "$(command -v luac5.4)" /usr/local/bin/luac
+
+      - name: Unit + config-syntax tests
+        run: node --test tests/model.test.js tests/manifest.test.js tests/lua.test.js
+
+  # The Hyprland contract tests (tests/hypr-contract.test.js) need a live
+  # Hyprland session and cannot run in CI — run them locally with
+  # `npm run test:contract` or `bash scripts/check.sh` inside your desktop.
+
+  qmllint:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational: qs.* imports never resolve here
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install qmllint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qml6-module-qtquick qt6-declarative-dev-tools || \
+          sudo apt-get install -y qt6-tools-dev-tools
+      - name: Lint QML (best effort)
+        run: |
+          QL="$(command -v qmllint6 || command -v qmllint || echo /usr/lib/qt6/bin/qmllint)"
+          "$QL" ./*.qml || true

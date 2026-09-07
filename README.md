@@ -1,6 +1,6 @@
 # Magic Trackpad — Omarchy bar widget
 
-Trackpad behaviour and finger-swipe gestures, from the Omarchy bar.
+Touchpad behaviour, from the Omarchy bar.
 
 Built and tested against **Omarchy 4.0.2** / **Hyprland 0.56.2** / **Quickshell 0.3.1**.
 
@@ -22,14 +22,15 @@ the current value, lets you flip it from a popup, applies it live with
 - Middle-click emulation
 - Scroll speed — Slow / Normal / Fast (`scroll_factor` 0.2 / 0.4 / 0.8)
 
-**Finger swipes**
-- Swipe to switch workspace — on/off, 3 or 4 fingers (Hyprland `gesture`)
-
 Left-click the bar icon for the panel. Inside: `j`/`k` or arrows move the
 cursor, `Enter`/`Space` activates, `Esc` closes; mouse works too.
 
 ## Not in v0.1 (planned)
 
+- **Finger-swipe gestures** (3/4-finger → switch workspace). Deferred because
+  a runtime `hl.gesture(...)` can't be cleanly un-registered (`hyprctl reload`
+  doesn't drop it) and errors if a gesture for that direction already exists.
+  Needs a proper register/unregister design.
 - **Apple Magic Trackpad Taptic Engine strength** (Off / Low / Medium / High)
   and click recovery — needs the `magic-haptic` backend (vendored in `bin/`)
   plus a one-time udev rule (`setup.sh`).
@@ -54,6 +55,18 @@ omarchy-shell shell rescanPlugins
 omarchy plugin enable andrewmp1.magic-trackpad
 omarchy restart shell        # needed after construction-time changes
 ```
+
+## Testing
+
+```sh
+npm test                 # unit + manifest + generated-Lua-syntax (needs `luac`; CI installs it)
+npm run test:contract    # live checks against your running Hyprland (safe: save + restore)
+npm run check            # all of the above + `omarchy plugin validate` + qmllint
+```
+
+`tests/hypr-contract.test.js` is the layer that catches Hyprland API drift —
+it applies each setting with the plugin's own command and asserts the change,
+then restores. It auto-skips outside a Hyprland session, so CI runs the rest.
 
 ## What it writes
 

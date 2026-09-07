@@ -10,15 +10,16 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 | --- | --- |
 | `Model.js` | All pure logic: the setting catalogue, `hyprctl getoption` parsing, the apply plan, the generated Lua, the loader-line guard. No QML imports — `node --test tests/model.test.js` runs it directly. |
 | `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk + in memory, normalized on every read. Source of truth. |
-| `HyprSync.qml` | Config → live Hyprland (`hyprctl keyword`), the read-back (`hyprctl getoption`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua`. |
+| `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"`), the read-back (`hyprctl getoption -j`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua`. |
 | `Panel.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. |
 | `bin/magic-haptic` | Vendored from the research repo. Backend for the **planned** haptics phase; unused in v0.1. |
 | `setup.sh` | One-time udev rule for the **planned** haptics phase. Not needed for v0.1. |
 
 ## Scope: three phases
 
-1. **v0.1 — Level 1 (this).** libinput touchpad options + Hyprland finger
-   swipes. No daemon, no permissions.
+1. **v0.1 — Level 1 (this).** libinput touchpad options only. No daemon, no
+   permissions. Finger swipes were cut before release — see the gesture note
+   below.
 2. **Haptics.** Apple Magic Trackpad Taptic Engine strength via `magic-haptic`
    + a udev `input`-group perms rule (`setup.sh`). Adds a "Haptics" section
    and a per-unit picker.
@@ -27,11 +28,16 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 
 ## Things that will bite you (from building Omarchy plugins)
 
-- **`hyprctl getoption` has no gesture read-back.** `gestures:*` options don't
-  exist in Hyprland 0.51+. Finger swipes are registered with the `gesture`
-  keyword and can't be un-registered at runtime — disabling one runs
-  `hyprctl reload` after regenerating the managed Lua (which no longer emits
-  it).
+- **Runtime config goes through `hyprctl eval "hl.config{...}"`, never
+  `hyprctl keyword`.** Omarchy runs Hyprland's Lua parser, which rejects
+  `keyword` outright ("can't work with non-legacy parsers. Use eval."). Reads
+  still use `hyprctl getoption -j` (works with either parser); option names
+  are the underscore form (`input:touchpad:tap_to_click`), which both accept.
+- **Gestures are cut from v0.1.** A runtime `hl.gesture(...)` is sticky —
+  `hyprctl reload` does NOT remove it, only a full Hyprland restart does — and
+  it errors ("overshadowed") if a gesture for that direction already exists,
+  including one the user set in their own `input.lua`. `Model.PLANNED_GESTURES`
+  holds the catalogue for a v0.2 that solves register/unregister.
 - **The config document is the source of truth, not Hyprland.** `getoption`
   is only read to *show* the state of an option the user hasn't set yet
   (`Model.effectiveToggle`). Once set, the JSON wins.
@@ -44,18 +50,29 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
   nor `onLoadFailed`.** `ConfigStore` has a 500ms fallback timer.
 - **Two handlers for one property (e.g. a second `Component.onCompleted`) is a
   fatal load error.** `qmllint` still exits 0.
-- **`qmllint` can't resolve `qs.Commons` / `qs.Ui` outside Quickshell.** The
-  `Panel -> Panel` inheritance-cycle and unqualified-`bar`/`Color` warnings
-  are false positives that first-party plugins produce too. Read the output
-  for real syntax errors only.
+- **`qmllint` can't resolve `qs.Commons` / `qs.Ui` outside Quickshell.**
+  `scripts/check.sh` silences the categories that fire only because of that
+  (`--import`, `--unresolved-type`, `--unqualified`, ...); a lone
+  `Panel -> Panel` inheritance-cycle line remains and is expected — first-party
+  plugins produce it too.
 
 ## Validation
 
 ```sh
-node --test tests/model.test.js
-/usr/lib/qt6/bin/qmllint -I /usr/share/omarchy/shell *.qml   # expect qs.* import noise
-omarchy plugin validate .
+bash scripts/check.sh        # runs all four layers; exits non-zero on a real failure
 ```
+
+Layers:
+1. `node --test tests/model.test.js tests/manifest.test.js tests/lua.test.js`
+   — pure logic, manifest/id consistency, generated-Lua parses under `luac`.
+2. `omarchy plugin validate .` — manifest schema.
+3. `qmllint` (informational) — with the `qs.*`-unresolvable categories
+   silenced; a lone `Panel -> Panel` line is expected.
+4. `node --test tests/hypr-contract.test.js` — live Hyprland; each setting is
+   applied with the plugin's own command, asserted, then restored. Skips
+   outside a session. CI can't run this one.
+
+`.github/workflows/ci.yml` runs layers 1 (+ lua) on every push/PR.
 
 ## Manual check
 
@@ -65,7 +82,7 @@ omarchy restart shell
 omarchy plugin enable andrewmp1.magic-trackpad
 # open the panel, flip "Natural scroll", then:
 hyprctl getoption -j input:touchpad:natural_scroll        # bool flips
-cat ~/.config/hypr/omarchy-magic-trackpad.lua             # hl.keyword line present
+cat ~/.config/hypr/omarchy-magic-trackpad.lua             # hl.config line present
 grep omarchy-magic-trackpad ~/.config/hypr/hyprland.lua   # loader line present
 ```
 
