@@ -47,5 +47,22 @@ else
 fi
 
 echo
+echo "== 5. shell smoke (loads + opens without a QML error) =="
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v omarchy-shell >/dev/null; then
+  bash tests/smoke.sh; rc=$?
+  [ "$rc" -eq 0 ] || [ "$rc" -eq 77 ] || fail=1
+else
+  echo "  (needs a running omarchy-shell — skipped)"
+fi
+
+echo
+echo "== 6. panel e2e (synthetic keystrokes -> real side effects) =="
+if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v wtype >/dev/null; then
+  bash tests/e2e.sh || fail=1
+else
+  echo "  (needs a Hyprland session + wtype — skipped)"
+fi
+
+echo
 if [ "$fail" -eq 0 ]; then echo "ALL GATING CHECKS PASSED"; else echo "CHECKS FAILED"; fi
 exit "$fail"

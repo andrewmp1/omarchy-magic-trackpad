@@ -24,9 +24,13 @@ jobs:
       - name: Unit + config-syntax tests
         run: node --test tests/model.test.js tests/manifest.test.js tests/lua.test.js
 
-  # The Hyprland contract tests (tests/hypr-contract.test.js) need a live
-  # Hyprland session and cannot run in CI — run them locally with
-  # `npm run test:contract` or `bash scripts/check.sh` inside your desktop.
+  # Layers 4-6 need a live Hyprland + omarchy-shell (+ wtype for the panel
+  # e2e) and cannot run in CI. Run them on your desktop:
+  #   npm run test:contract     # tests/hypr-contract.test.js
+  #   bash tests/smoke.sh       # plugin loads + panel opens, no QML error
+  #   bash tests/e2e.sh         # synthetic keystrokes -> real side effects
+  #   bash scripts/check.sh     # all six, in order
+  # See docs/TESTING.md.
 
   qmllint:
     runs-on: ubuntu-latest

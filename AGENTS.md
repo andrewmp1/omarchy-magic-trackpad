@@ -69,10 +69,14 @@ Layers:
 3. `qmllint` (informational) — with the `qs.*`-unresolvable categories
    silenced; a lone `Panel -> Panel` line is expected.
 4. `node --test tests/hypr-contract.test.js` — live Hyprland; each setting is
-   applied with the plugin's own command, asserted, then restored. Skips
-   outside a session. CI can't run this one.
+   applied with the plugin's own command, asserted, then restored.
+5. `tests/smoke.sh` — plugin loads into the running shell and the panel opens
+   with no QML `TypeError` in the journal.
+6. `tests/e2e.sh` — `wtype` drives the panel's keyboard cursor; asserts the
+   real Hyprland option + JSON document + persistence across `hyprctl reload`.
 
-`.github/workflows/ci.yml` runs layers 1 (+ lua) on every push/PR.
+Layers 4-6 skip off-desktop. `.github/workflows/ci.yml` runs 1-3 on push/PR.
+Full menu + a manual checklist: `docs/TESTING.md`.
 
 ## Manual check
 

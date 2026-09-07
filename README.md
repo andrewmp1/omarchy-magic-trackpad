@@ -64,9 +64,11 @@ npm run test:contract    # live checks against your running Hyprland (safe: save
 npm run check            # all of the above + `omarchy plugin validate` + qmllint
 ```
 
-`tests/hypr-contract.test.js` is the layer that catches Hyprland API drift —
-it applies each setting with the plugin's own command and asserts the change,
-then restores. It auto-skips outside a Hyprland session, so CI runs the rest.
+`scripts/check.sh` also runs a **shell smoke test** (plugin loads + panel
+opens with no QML error) and an **end-to-end test** that drives the rendered
+panel with synthetic keystrokes (`wtype`) and confirms the real Hyprland
+option + saved document + persistence. Both skip off-desktop. Full menu and a
+manual checklist: [`docs/TESTING.md`](docs/TESTING.md).
 
 ## What it writes
 
