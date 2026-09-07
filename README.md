@@ -26,8 +26,9 @@ knobs Hyprland already has one click away — no `input.lua` spelunking, no
   plugin, delete two files — your config is byte-for-byte back.
 - **Reads your real state.** Options you've never touched show Hyprland's
   current value; the plugin only writes the ones you actually change.
-- **No daemon. No root. No device access.** Everything here is a plain
-  libinput/Hyprland setting.
+- **No daemon. No root. No device access. No dependencies.** Everything here
+  is a plain libinput/Hyprland setting driven through `hyprctl`, which every
+  Omarchy install already has.
 - **Native to the bar.** Themed by your Omarchy theme, keyboard-navigable
   (`j`/`k`, `Enter`, `Esc`), and it does not spawn a second Quickshell.
 
@@ -87,7 +88,7 @@ omarchy plugin enable andrewmp1.magic-trackpad
 Six layers, run by `bash scripts/check.sh`:
 
 1. **Unit** — config normalization, the exact `hl.config` strings, the apply plan.
-2. **Manifest** — schema + `Panel.qml` `moduleName` stays in step with the id.
+2. **Manifest** — schema + `BarWidget.qml` `moduleName` stays in step with the id.
 3. **Config syntax** — the generated `.lua` is parsed with `luac` (a syntax
    error there would break your whole Hyprland config).
 4. **Hyprland contract** — every setting, applied with the plugin's own

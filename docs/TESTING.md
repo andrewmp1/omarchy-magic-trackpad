@@ -21,7 +21,7 @@ ones.
 - the generated `~/.config/hypr/omarchy-magic-trackpad.lua` **parses as Lua**
   (a syntax error there would break the user's whole Hyprland config)
 - the one-line loader edit to `hyprland.lua` is idempotent and still valid Lua
-- `Panel.qml` `moduleName` == manifest `id`; README/AGENTS mention it
+- `BarWidget.qml` `moduleName` == manifest `id`; README/AGENTS mention it
   (guards the "rename the handle everywhere" footgun)
 
 **4 — Hyprland contract (the API-drift tripwire):**
@@ -63,12 +63,14 @@ failure.
    `~/.config/omarchy/magic-trackpad.json` gains `"naturalScroll"`.
 4. Change **Scroll speed** to Fast → scrolling is noticeably quicker.
 5. `hyprctl reload` → settings stick.
-6. `omarchy restart shell` → panel still shows your values; bar glyph is lit.
-7. Log out and back in → settings still applied (the loader line in
+6. `omarchy plugin disable andrewmp1.magic-trackpad` → glyph gone;
+   `omarchy plugin enable …` → it comes back with your settings intact.
+7. `omarchy restart shell` → panel still shows your values; bar glyph is lit.
+8. Log out and back in → settings still applied (the loader line in
    `hyprland.lua` did its job).
-8. Keyboard: open panel, `j`/`k` move, `Enter` toggles, `Esc` closes.
-9. `omarchy plugin remove andrewmp1.magic-trackpad` then delete the two
-   generated files + the loader line → Hyprland is exactly as before.
+9. Keyboard: open panel, `j`/`k` move, `Enter` toggles, `Esc` closes.
+10. `omarchy plugin remove andrewmp1.magic-trackpad` then delete the two
+    generated files + the loader line → Hyprland is exactly as before.
 
 ## Mouse automation (optional)
 

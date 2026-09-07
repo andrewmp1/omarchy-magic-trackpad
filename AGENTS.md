@@ -11,7 +11,7 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 | `Model.js` | All pure logic: the setting catalogue, `hyprctl getoption` parsing, the apply plan, the generated Lua, the loader-line guard. No QML imports — `node --test tests/model.test.js` runs it directly. |
 | `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk + in memory, normalized on every read. Source of truth. |
 | `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"`), the read-back (`hyprctl getoption -j`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua`. |
-| `Panel.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. |
+| `BarWidget.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. |
 | `bin/magic-haptic` | Vendored from the research repo. Backend for the **planned** haptics phase; unused in v0.1. |
 | `setup.sh` | One-time udev rule for the **planned** haptics phase. Not needed for v0.1. |
 
@@ -92,6 +92,50 @@ grep omarchy-magic-trackpad ~/.config/hypr/hyprland.lua   # loader line present
 
 ## Plugin id / author handle
 
-`andrewmp1.magic-trackpad` — the `andrewmp1` prefix is the GitHub handle and
-appears in the manifest `id`, the install path, and every `moduleName` /
-`ipcTarget`. Change all of them together if the handle is different.
+`andrewmp1.magic-trackpad` — the prefix is the GitHub handle. It appears in
+the manifest `id`, the install path, and `BarWidget.qml`'s `moduleName` (a
+test enforces the match). `ipcTarget` is the shorter `"magic-trackpad"`.
+Change the id in all those places together.
+
+The dev guide's example is reverse-DNS (`io.github.<user>.<name>`); the
+short `<handle>.<name>` form is what the marketplace's own installed
+third-party plugins use (`bjarneo.workspace-layout`, `leonardom011.wayvnc`)
+and it passes `omarchy plugin validate`. Either is fine; pick before
+publishing.
+
+## Audited against https://plugins.omarchy.org/develop.html
+
+Checked and compliant:
+
+- `manifest.json` has every required field (`schemaVersion`, `id`, `name`,
+  `version`, `author`, `license`, `description`, `kinds`, `entryPoints`) plus
+  the `barWidget` block (`displayName`, `category`, `allowMultiple`,
+  `defaultSection`). `omarchy plugin validate .` passes.
+- `id` is namespaced and does **not** start with `omarchy.` (reserved).
+- `bar-widget` kind → `entryPoints.barWidget` → **`BarWidget.qml`** (the
+  guide's conventional name; renamed from `Panel.qml` for this).
+- `BarWidget.qml` imports `QtQuick` / `Quickshell` / `qs.Ui`, sets
+  `moduleName` == the id, and extends `qs.Ui.Panel`, which supplies the
+  required `open()` / `close()` / `toggle()` / `opened` /
+  `popoutSwitchClosing` and forwards the lifecycle to
+  `controller.show()` / `hide()`. It uses `KeyboardPanel` + `PanelKeyCatcher`.
+- Single file for the widget *and* its popup (no `Loader`, no second manifest
+  kind) — matches the first-party `panels/*/Panel.qml` pattern.
+- One Quickshell process (extends the running shell; never spawns another).
+- No symlinks inside the repo. No `omarchy.clonedFrom` (built from scratch).
+- `LICENSE` is MIT with a 2026 copyright + author. `preview.png` present.
+- README has the `omarchy plugin add … --enable` install line, usage, and
+  removal steps. External deps + privilege boundary stated ("no daemon, no
+  root, no device access, no dependencies").
+
+Deliberate deviations (first-party precedent, not blockers):
+
+- Uses `BarIconButton` for the bar element, not `WidgetButton` — same choice
+  the first-party `power` / `tailscale` widgets make (it owns the icon slot +
+  optical centering).
+- `manageIpc` left at its default `true`: the widget needs only the standard
+  open/close/toggle on its own `ipcTarget`, so it doesn't declare an extra
+  `IpcHandler` the way `power` does.
+
+Pre-publish still to do: replace the id handle if needed, push to a public
+repo, submit via the marketplace's "Submit a plugin" issue.

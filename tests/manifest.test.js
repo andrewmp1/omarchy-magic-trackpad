@@ -22,10 +22,10 @@ test("every declared entry-point file exists", () => {
   }
 })
 
-test("Panel.qml moduleName / ipcTarget stay in step with the manifest id", () => {
-  const qml = fs.readFileSync(path.join(root, "Panel.qml"), "utf8")
+test("BarWidget.qml moduleName stays in step with the manifest id", () => {
+  const qml = fs.readFileSync(path.join(root, "BarWidget.qml"), "utf8")
   assert.ok(qml.includes(`moduleName: "${manifest.id}"`),
-    `Panel.qml must declare moduleName: "${manifest.id}" (change the handle in ALL places together)`)
+    `BarWidget.qml must declare moduleName: "${manifest.id}" (change the handle in ALL places together)`)
 })
 
 test("README + AGENTS reference the same plugin id", () => {

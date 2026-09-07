@@ -30,7 +30,7 @@ if [ -n "$QL" ]; then
   # import, unresolved-type, unqualified and inheritance-cycle categories are
   # all false positives here. Silence those; a genuine QML *syntax* error
   # still surfaces (and still exits non-zero).
-  "$QL" -I /usr/share/omarchy/shell \
+  "$QL" -I "${OMARCHY_PATH:-/usr/share/omarchy}/shell" \
     --import disable --unresolved-type disable --unqualified disable \
     --unused-imports disable --missing-type disable --signal-handler-parameters disable --required disable \
     ./*.qml 2>&1 | sed 's/^/  /' || true

@@ -5,7 +5,7 @@
 #
 # Catches what unit tests can't: a Repeater delegate that leaves `modelData`
 # undefined, a renamed qs.Ui component, a second Component.onCompleted — each
-# logs `WARN scene: ... Panel.qml ... TypeError` and renders nothing.
+# logs `WARN scene: ... BarWidget.qml ... TypeError` and renders nothing.
 #
 # Does NOT restart the shell (that's disruptive and racy); it reloads plugin
 # code with `rescanPlugins` and only restarts if the shell isn't answering.

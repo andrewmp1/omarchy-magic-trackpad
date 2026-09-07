@@ -47,9 +47,9 @@ device access belongs to a later phase — see the roadmap in the README.
 
 | File | Role |
 |---|---|
-| `manifest.json` | Omarchy plugin manifest (`bar-widget`, entry `Panel.qml`) |
+| `manifest.json` | Omarchy plugin manifest (`bar-widget`, entry `BarWidget.qml`) |
 | `Model.js` | all pure logic + `node --test` fixtures |
-| `Panel.qml` | the bar button + popup (the `barWidget` entry point) |
+| `BarWidget.qml` | the bar button + popup (the `barWidget` entry point) |
 | `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk |
 | `HyprSync.qml` | live apply (`hyprctl eval`), read-back, the managed `.lua` |
 | `tests/` | `*.test.js` (portable) + `*.sh` (on-desktop) |
