@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "andrewmp1.magic-trackpad",
+  "name": "Magic Trackpad",
+  "version": "0.1.0",
+  "author": "Drew Purdy",
+  "license": "MIT",
+  "description": "Trackpad status and gestures in the Omarchy bar. Level 1: read and set the libinput touchpad behaviour Hyprland already supports — tap-to-click, two-finger right-click, natural scroll, scroll speed, disable-while-typing — plus finger-swipe gestures, all persisted and reversible. Later phases add Apple Magic Trackpad Taptic Engine strength and a custom-gesture daemon.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Magic Trackpad",
+    "description": "Touchpad behaviour and finger-swipe gestures, from the bar.",
+    "category": "System",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
