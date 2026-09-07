@@ -13,6 +13,7 @@ Panel {
   ipcTarget: "magic-trackpad"
 
   readonly property color fg: bar ? bar.foreground : Color.foreground
+  readonly property color accent: Color.accent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   readonly property var cfg: store.config
@@ -56,14 +57,24 @@ Panel {
     flash(value ? "On" : "Off")
   }
 
+  function setScroll(key) {
+    store.mutate(function (d) { d.scrollSpeed = key })
+    sync.runOne(Model.toggleEvalArgs(Model.SCROLL_FIELD, Model.scrollStopValue(key)))
+    sync.writeManaged(store.config)
+    flash("Scroll: " + key)
+  }
+
   function cycleScroll() {
     var order = Model.SCROLL_STOPS.map(function (s) { return s.key })
     var idx = Math.max(0, order.indexOf(Model.effectiveScroll(cfg, sync.liveValues)))
-    var next = order[(idx + 1) % order.length]
-    store.mutate(function (d) { d.scrollSpeed = next })
-    sync.runOne(Model.toggleEvalArgs(Model.SCROLL_FIELD, Model.scrollStopValue(next)))
-    sync.writeManaged(store.config)
-    flash("Scroll: " + next)
+    setScroll(order[(idx + 1) % order.length])
+  }
+
+  // index of the current scroll stop, for the ButtonGroup cursor highlight
+  function scrollIndex() {
+    var cur = Model.effectiveScroll(cfg, sync.liveValues)
+    for (var i = 0; i < Model.SCROLL_STOPS.length; i++) if (Model.SCROLL_STOPS[i].key === cur) return i
+    return 1
   }
 
 
@@ -158,26 +169,52 @@ Panel {
         anchors.top: parent.top
         spacing: Style.space(12)
 
-        // ---- hero ----
-        Column {
+        // ---- hero: glyph · title · summary ----
+        Row {
           width: parent.width
-          spacing: Style.space(2)
-          Text {
-            text: "Trackpad"
-            color: root.fg
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.title
-            font.bold: true
+          spacing: Style.space(11)
+
+          Rectangle {
+            id: heroGlyph
+            width: Style.space(30)
+            height: Style.space(21)
+            anchors.verticalCenter: parent.verticalCenter
+            radius: Math.max(2, Style.space(5))
+            color: Qt.rgba(root.accent.r, root.accent.g, root.accent.b, 0.10)
+            border.width: Math.max(1, Style.space(2) - 1)
+            border.color: root.accent
+            Rectangle {
+              anchors.horizontalCenter: parent.horizontalCenter
+              anchors.top: parent.top
+              anchors.topMargin: Style.space(4)
+              width: Style.space(10)
+              height: Math.max(1, Style.space(2))
+              radius: height
+              color: root.accent
+            }
           }
-          Text {
-            text: root.notice !== "" ? root.notice : Model.summaryLine(root.cfg).toUpperCase()
-            color: Qt.darker(root.fg, 1.4)
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            font.bold: true
-            font.letterSpacing: 1.1
-            elide: Text.ElideRight
-            width: parent.width
+
+          Column {
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - heroGlyph.width - parent.spacing
+            spacing: Style.space(1)
+            Text {
+              text: "Trackpad"
+              color: root.fg
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              font.bold: true
+            }
+            Text {
+              text: root.notice !== "" ? root.notice : Model.summaryLine(root.cfg).toUpperCase()
+              color: Qt.darker(root.fg, 1.45)
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              font.bold: true
+              font.letterSpacing: 1.1
+              elide: Text.ElideRight
+              width: parent.width
+            }
           }
         }
 
@@ -188,80 +225,67 @@ Panel {
 
         Column {
           width: parent.width
-          spacing: Style.space(6)
+          spacing: Style.space(3)
           Repeater {
             model: Model.TOUCHPAD_TOGGLES
-            Row {
+            Item {
+              id: rowWrap
               required property var modelData
-              required property int index
               width: column.width
-              spacing: Style.space(8)
-              Text {
-                width: parent.width - stateBtn.width - parent.spacing
-                anchors.verticalCenter: parent.verticalCenter
-                text: modelData.label
-                color: root.fg
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.bodySmall
-                elide: Text.ElideRight
-              }
-              Button {
-                id: stateBtn
-                text: Model.effectiveToggle(root.cfg, sync.liveValues, modelData.key) ? "On" : "Off"
-                fontSize: Style.font.bodySmall
-                bordered: true
+              implicitHeight: tog.implicitHeight
+              Toggle {
+                id: tog
+                width: parent.width
+                label: rowWrap.modelData.label
                 foreground: root.fg
+                accent: root.accent
                 fontFamily: root.fontFamily
-                active: Model.effectiveToggle(root.cfg, sync.liveValues, modelData.key)
+                checked: Model.effectiveToggle(root.cfg, sync.liveValues, rowWrap.modelData.key)
                 hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
                   && root.navItems[root.cursorIndex].kind === "toggle"
-                  && root.navItems[root.cursorIndex].key === modelData.key
-                onClicked: root.setToggle(modelData.key, modelData.field, !Model.effectiveToggle(root.cfg, sync.liveValues, modelData.key))
+                  && root.navItems[root.cursorIndex].key === rowWrap.modelData.key
+                onClicked: root.setToggle(rowWrap.modelData.key, rowWrap.modelData.field,
+                  !Model.effectiveToggle(root.cfg, sync.liveValues, rowWrap.modelData.key))
                 onHovered: function (h) {
                   if (h) {
                     root.cursorActive = true
                     for (var i = 0; i < root.navItems.length; i++)
-                      if (root.navItems[i].kind === "toggle" && root.navItems[i].key === modelData.key) root.cursorIndex = i
+                      if (root.navItems[i].kind === "toggle" && root.navItems[i].key === rowWrap.modelData.key) root.cursorIndex = i
                   }
                 }
               }
             }
           }
+        }
 
-          // scroll speed
-          Row {
-            width: column.width
-            spacing: Style.space(8)
-            Text {
-              width: parent.width - scrollBtn.width - parent.spacing
-              anchors.verticalCenter: parent.verticalCenter
-              text: "Scroll speed"
-              color: root.fg
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.bodySmall
-            }
-            Button {
-              id: scrollBtn
-              text: {
-                var cur = Model.effectiveScroll(root.cfg, sync.liveValues)
-                for (var i = 0; i < Model.SCROLL_STOPS.length; i++)
-                  if (Model.SCROLL_STOPS[i].key === cur) return Model.SCROLL_STOPS[i].label
-                return "Normal"
-              }
-              fontSize: Style.font.bodySmall
-              bordered: true
-              foreground: root.fg
-              fontFamily: root.fontFamily
-              hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
-                && root.navItems[root.cursorIndex].kind === "scroll"
-              onClicked: root.cycleScroll()
-              onHovered: function (h) {
-                if (h) {
-                  root.cursorActive = true
-                  for (var i = 0; i < root.navItems.length; i++)
-                    if (root.navItems[i].kind === "scroll") root.cursorIndex = i
-                }
-              }
+        PanelSeparator { foreground: root.fg }
+
+        // ---- scroll speed ----
+        PanelSectionHeader { text: "SCROLL SPEED"; foreground: root.fg; fontFamily: root.fontFamily }
+
+        ButtonGroup {
+          id: scrollGroup
+          width: parent.width
+          options: [
+            { value: "slow", label: "Slow" },
+            { value: "normal", label: "Normal" },
+            { value: "fast", label: "Fast" }
+          ]
+          value: Model.effectiveScroll(root.cfg, sync.liveValues)
+          foreground: root.fg
+          background: root.bar ? root.bar.background : Color.background
+          accent: root.accent
+          fontFamily: root.fontFamily
+          fontSize: Style.font.bodySmall
+          focusable: false
+          cursorIndex: (root.cursorActive && root.navItems[root.cursorIndex]
+            && root.navItems[root.cursorIndex].kind === "scroll") ? root.scrollIndex() : -1
+          onChanged: function (v) { root.setScroll(v) }
+          onHovered: function (index, isHovered) {
+            if (isHovered) {
+              root.cursorActive = true
+              for (var i = 0; i < root.navItems.length; i++)
+                if (root.navItems[i].kind === "scroll") root.cursorIndex = i
             }
           }
         }

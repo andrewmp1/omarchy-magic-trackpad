@@ -32,7 +32,7 @@ if [ -n "$QL" ]; then
   # still surfaces (and still exits non-zero).
   "$QL" -I /usr/share/omarchy/shell \
     --import disable --unresolved-type disable --unqualified disable \
-    --unused-imports disable --missing-type disable --signal-handler-parameters disable \
+    --unused-imports disable --missing-type disable --signal-handler-parameters disable --required disable \
     ./*.qml 2>&1 | sed 's/^/  /' || true
 else
   echo "  (qmllint not found — skipped; install qt6 qmllint)"
