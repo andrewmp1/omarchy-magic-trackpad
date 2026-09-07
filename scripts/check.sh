@@ -58,6 +58,7 @@ fi
 echo
 echo "== 6. panel e2e (synthetic keystrokes -> real side effects) =="
 if [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] && command -v wtype >/dev/null; then
+  sleep 3   # let the widget settle after layer 5 poked the shell
   bash tests/e2e.sh || fail=1
 else
   echo "  (needs a Hyprland session + wtype — skipped)"

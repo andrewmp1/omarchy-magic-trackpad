@@ -1,41 +1,47 @@
-# Magic Trackpad — Omarchy bar widget
+# Magic Trackpad — an Omarchy bar plugin
 
-Touchpad behaviour, from the Omarchy bar.
+**Your trackpad, tuned from the bar.** A [Quickshell](https://quickshell.org/)
+bar widget for [Omarchy](https://omarchy.org/) that puts the libinput touchpad
+knobs Hyprland already has one click away — no `input.lua` spelunking, no
+`hyprctl` incantations to memorize.
 
-Built and tested against **Omarchy 4.0.2** / **Hyprland 0.56.2** / **Quickshell 0.3.1**.
+[![ci](https://github.com/andrewmp1/omarchy-magic-trackpad/actions/workflows/ci.yml/badge.svg)](https://github.com/andrewmp1/omarchy-magic-trackpad/actions/workflows/ci.yml)
+&nbsp;·&nbsp; MIT
+&nbsp;·&nbsp; Omarchy 4 / Hyprland 0.56 / Quickshell 0.3
+&nbsp;·&nbsp; [Website](https://andrewmp1.github.io/omarchy-magic-trackpad/)
 
-<!-- preview.png goes here once the widget is running -->
+<p align="center">
+  <img src="docs/screenshots/panel.png" alt="The Magic Trackpad panel open in the Omarchy bar" width="360">
+</p>
 
-## What it does (v0.1 — "Level 1")
+## Why
 
-Everything here is a plain **libinput / Hyprland** setting. The widget reads
-the current value, lets you flip it from a popup, applies it live with
-`hyprctl keyword`, and writes it to a managed file so it survives a restart.
-**No daemon, no root, no device access.**
+- **It's the trackpad pane Omarchy doesn't ship.** Tap-to-click, two-finger
+  right-click, natural scroll, scroll speed, disable-while-typing — the
+  settings everyone changes, in a panel instead of a text file.
+- **Instant.** Flip a switch and libinput reacts *now* — the panel talks to
+  the running Hyprland with `hl.config`, not a config reload.
+- **Persistent and reversible.** Choices go to one JSON file and a managed
+  `~/.config/hypr/*.lua` that Hyprland sources on every load. Remove the
+  plugin, delete two files — your config is byte-for-byte back.
+- **Reads your real state.** Options you've never touched show Hyprland's
+  current value; the plugin only writes the ones you actually change.
+- **No daemon. No root. No device access.** Everything here is a plain
+  libinput/Hyprland setting.
+- **Native to the bar.** Themed by your Omarchy theme, keyboard-navigable
+  (`j`/`k`, `Enter`, `Esc`), and it does not spawn a second Quickshell.
 
-**Touchpad**
-- Tap to click
-- Two-finger right-click (`clickfinger_behavior`)
-- Natural scroll
-- Disable while typing
-- Tap and drag
-- Middle-click emulation
-- Scroll speed — Slow / Normal / Fast (`scroll_factor` 0.2 / 0.4 / 0.8)
+## What it controls
 
-Left-click the bar icon for the panel. Inside: `j`/`k` or arrows move the
-cursor, `Enter`/`Space` activates, `Esc` closes; mouse works too.
-
-## Not in v0.1 (planned)
-
-- **Finger-swipe gestures** (3/4-finger → switch workspace). Deferred because
-  a runtime `hl.gesture(...)` can't be cleanly un-registered (`hyprctl reload`
-  doesn't drop it) and errors if a gesture for that direction already exists.
-  Needs a proper register/unregister design.
-- **Apple Magic Trackpad Taptic Engine strength** (Off / Low / Medium / High)
-  and click recovery — needs the `magic-haptic` backend (vendored in `bin/`)
-  plus a one-time udev rule (`setup.sh`).
-- **Custom gestures** (finger-count → button, force-press, corner taps) —
-  needs a small opt-in userspace daemon (host-click mode + `uinput`).
+| | |
+|---|---|
+| **Tap to click** | tap the pad instead of pressing down |
+| **Two-finger right-click** | 2 fingers → right, 3 → middle (`clickfinger_behavior`) |
+| **Natural scroll** | content follows the fingers |
+| **Disable while typing** | ignore the pad briefly after a keypress |
+| **Tap and drag** | tap-tap-hold to start a drag |
+| **Middle-click emulation** | left + right together → middle |
+| **Scroll speed** | Slow · Normal · Fast (`scroll_factor` 0.2 / 0.4 / 0.8) |
 
 ## Install
 
@@ -44,53 +50,95 @@ omarchy plugin add https://github.com/andrewmp1/omarchy-magic-trackpad.git --ena
 omarchy bar move andrewmp1.magic-trackpad --section right   # optional placement
 ```
 
-Plugins land disabled for review; `--enable` opts in. Code runs unsandboxed
-inside `omarchy-shell` — read it first.
+Plugins land disabled for review; `--enable` opts in. Plugin code runs
+unsandboxed inside `omarchy-shell` — read it first. Left-click the trackpad
+glyph in the bar to open the panel.
 
-### From a local checkout (development)
+<details>
+<summary>Install from a local checkout (development)</summary>
 
 ```sh
-ln -s "$PWD" ~/.config/omarchy/plugins/andrewmp1.magic-trackpad
-omarchy-shell shell rescanPlugins
+git clone https://github.com/andrewmp1/omarchy-magic-trackpad.git
+ln -s "$PWD/omarchy-magic-trackpad" ~/.config/omarchy/plugins/andrewmp1.magic-trackpad
+omarchy restart shell
 omarchy plugin enable andrewmp1.magic-trackpad
-omarchy restart shell        # needed after construction-time changes
 ```
+</details>
 
-## Testing
+## How it works
 
-```sh
-npm test                 # unit + manifest + generated-Lua-syntax (needs `luac`; CI installs it)
-npm run test:contract    # live checks against your running Hyprland (safe: save + restore)
-npm run check            # all of the above + `omarchy plugin validate` + qmllint
-```
-
-`scripts/check.sh` also runs a **shell smoke test** (plugin loads + panel
-opens with no QML error) and an **end-to-end test** that drives the rendered
-panel with synthetic keystrokes (`wtype`) and confirms the real Hyprland
-option + saved document + persistence. Both skip off-desktop. Full menu and a
-manual checklist: [`docs/TESTING.md`](docs/TESTING.md).
-
-## What it writes
+- The panel's settings document is `~/.config/omarchy/magic-trackpad.json` —
+  plain JSON you can read, diff, and keep in your dotfiles.
+- A change is applied live with `hyprctl eval "hl.config({ input = { touchpad
+  = { … } } })"` (Omarchy runs Hyprland's Lua config parser, which rejects
+  `hyprctl keyword`).
+- The same change is written to `~/.config/hypr/omarchy-magic-trackpad.lua`,
+  loaded by one guarded `dofile` line the plugin appends to `hyprland.lua`, so
+  it survives a restart.
 
 | Path | Purpose |
 |---|---|
 | `~/.config/omarchy/magic-trackpad.json` | your settings (source of truth; delete to reset) |
-| `~/.config/hypr/omarchy-magic-trackpad.lua` | generated — re-applies the settings on every Hyprland load |
-| `~/.config/hypr/hyprland.lua` | one guarded loader line appended (`-- omarchy-magic-trackpad`) |
+| `~/.config/hypr/omarchy-magic-trackpad.lua` | generated — re-applies your settings on every Hyprland load |
+| `~/.config/hypr/hyprland.lua` | +1 guarded loader line (`-- omarchy-magic-trackpad`) |
 
-To fully remove: `omarchy plugin remove andrewmp1.magic-trackpad`, then delete
-the three items above (the loader line is a single `pcall(dofile, …)`).
+## Tested
+
+Six layers, run by `bash scripts/check.sh`:
+
+1. **Unit** — config normalization, the exact `hl.config` strings, the apply plan.
+2. **Manifest** — schema + `Panel.qml` `moduleName` stays in step with the id.
+3. **Config syntax** — the generated `.lua` is parsed with `luac` (a syntax
+   error there would break your whole Hyprland config).
+4. **Hyprland contract** — every setting, applied with the plugin's own
+   command, actually moves `hyprctl getoption`. The tripwire for API drift.
+5. **Shell smoke** — the plugin loads into a running `omarchy-shell` and the
+   panel opens with no QML error in the journal.
+6. **Panel e2e** — synthetic keystrokes (`wtype`) drive the rendered panel and
+   confirm the real Hyprland option, the saved document, and persistence
+   across `hyprctl reload`.
+
+```sh
+npm test               # layers 1-3 (portable — also what CI runs)
+npm run test:contract  # layer 4
+bash scripts/check.sh  # all six, skipping any that can't run here
+```
+
+Layers 1-3 run in CI on every push; 4-6 need a live desktop. Full menu and a
+manual release checklist: **[docs/TESTING.md](docs/TESTING.md)**.
+
+## Contributing
+
+Issues and PRs welcome.
+
+- **Found a bug?** Open an
+  [issue](https://github.com/andrewmp1/omarchy-magic-trackpad/issues/new/choose)
+  and fill in the template — `omarchy version`, `hyprctl version`, and the
+  output of `bash scripts/check.sh` go a long way.
+- **Sending a PR?** Read [CONTRIBUTING.md](CONTRIBUTING.md) and
+  [AGENTS.md](AGENTS.md) (architecture + the Omarchy-plugin gotchas), run
+  `bash scripts/check.sh`, and keep `Model.js` pure so `node --test` still
+  covers the logic.
+
+## Roadmap
+
+- **v0.2 — finger swipes.** 3/4-finger → switch workspace. Held back because a
+  runtime `hl.gesture` can't be cleanly un-registered yet.
+- **Haptics.** Apple Magic Trackpad Taptic Engine strength (Off / Low / Medium
+  / High) and click recovery — see `bin/magic-haptic` and `setup.sh`.
+- **Custom gestures.** Finger-count buttons, force-press, corner taps via an
+  opt-in userspace daemon.
 
 ## Uninstall
 
 ```sh
 omarchy plugin remove andrewmp1.magic-trackpad --yes
 rm -f ~/.config/hypr/omarchy-magic-trackpad.lua ~/.config/omarchy/magic-trackpad.json
-# then remove the `-- omarchy-magic-trackpad` line from ~/.config/hypr/hyprland.lua
+# then delete the `-- omarchy-magic-trackpad` line from ~/.config/hypr/hyprland.lua
 ```
 
 ## License
 
-MIT © 2026 Drew Purdy. `bin/magic-haptic` is from the
+MIT © 2026 Drew Purdy. `bin/magic-haptic` is vendored from the
 [magic-trackpad-haptics](https://github.com/andrewmp1/magic-trackpad-haptics)
-research repo, vendored for the planned haptics phase.
+research repo for the planned haptics phase.

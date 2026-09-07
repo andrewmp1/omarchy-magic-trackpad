@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Omarchy
+    url: https://omarchy.org/
+    about: Questions about Omarchy itself, not this plugin.
+  - name: Hyprland touchpad options
+    url: https://wiki.hypr.land/Configuring/Variables/#touchpad
+    about: What each input:touchpad:* setting does.

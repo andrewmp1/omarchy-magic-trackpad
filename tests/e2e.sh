@@ -24,6 +24,7 @@ command -v jq           >/dev/null || skip "jq not found"
 [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ] || skip "not in a Hyprland session"
 
 omarchy-shell shell ping 2>/dev/null | grep -q ok || skip "omarchy-shell not answering (start your desktop first)"
+sleep 2   # the widget's IPC handler can answer before keyboard focus routes cleanly
 
 # NB: `.bool // empty` is wrong — jq treats `false` as absent, so a toggle
 # flipping to false would read as "unchanged". Emit the literal instead.

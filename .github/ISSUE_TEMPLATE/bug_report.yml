@@ -1,0 +1,42 @@
+name: Bug report
+description: Something in the panel or its effect on the trackpad is wrong.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, what actually happened.
+      placeholder: |
+        Flipped "Natural scroll" on. Two-finger scrolling did not reverse.
+        `hyprctl getoption -j input:touchpad:natural_scroll` still shows false.
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Paste the output.
+      render: shell
+      placeholder: |
+        omarchy version
+        hyprctl version | head -1
+        # quickshell --version
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: scripts/check.sh output
+      description: "`bash scripts/check.sh` — or at least `npm test`. Skips are fine."
+      render: shell
+    validations:
+      required: false
+  - type: textarea
+    id: journal
+    attributes:
+      label: Journal (if the panel misbehaved)
+      description: "`journalctl --user -e | grep -i magic-trackpad`"
+      render: shell
+    validations:
+      required: false

@@ -1,0 +1,391 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Magic Trackpad — an Omarchy bar plugin</title>
+<meta name="description" content="A Quickshell bar widget for Omarchy: tap-to-click, two-finger right-click, natural scroll, scroll speed and more — one click away, applied live, fully reversible.">
+<meta property="og:title" content="Magic Trackpad — an Omarchy bar plugin">
+<meta property="og:description" content="Your trackpad, tuned from the Omarchy bar. No input.lua spelunking, no hyprctl incantations.">
+<meta property="og:image" content="screenshots/panel.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+<style>
+  :root {
+    --ground: #0e1016;
+    --surface: #161923;
+    --raised: #1e2230;
+    --ink: #cdd1de;
+    --ink-strong: #e9ebf2;
+    --dim: #7a8099;
+    --faint: #5a6076;
+    --line: #272c3c;
+    --accent: #7aa2f7;
+    --accent-quiet: rgba(122, 162, 247, 0.12);
+    --ok: #9ece6a;
+    --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+    --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    color-scheme: dark;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(1100px 520px at 82% -8%, rgba(122, 162, 247, 0.10), transparent 60%);
+    background-repeat: no-repeat;
+  }
+  img { max-width: 100%; display: block; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code { font-family: var(--mono); font-size: 0.92em; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+  .wrap {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: clamp(40px, 8vw, 96px) clamp(20px, 5vw, 32px) 80px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 12px;
+    font-weight: 500;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 18px;
+  }
+  h1 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: clamp(34px, 7vw, 52px);
+    letter-spacing: -0.02em;
+    line-height: 1.05;
+    color: var(--ink-strong);
+    margin: 0 0 14px;
+  }
+  .tagline {
+    font-size: clamp(17px, 2.6vw, 20px);
+    color: var(--ink);
+    max-width: 44ch;
+    margin: 0 0 30px;
+  }
+  .tagline strong { color: var(--ink-strong); font-weight: 600; }
+
+  .cta {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    max-width: 620px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .cta code {
+    flex: 1;
+    min-width: 0;
+    padding: 13px 15px;
+    font-size: 12.5px;
+    color: var(--ink);
+    overflow-x: auto;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+  }
+  .cta code .prompt { color: var(--faint); margin-right: 8px; }
+  .cta button {
+    flex: none;
+    appearance: none;
+    border: none;
+    border-left: 1px solid var(--line);
+    background: var(--raised);
+    color: var(--dim);
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 0 16px;
+    cursor: pointer;
+  }
+  .cta button:hover { color: var(--accent); background: var(--accent-quiet); }
+  .cta button.copied { color: var(--ok); }
+
+  .meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 10px;
+    margin: 18px 0 0;
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--dim);
+  }
+  .meta span {
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 11px;
+  }
+  .meta a { color: var(--dim); }
+  .meta a:hover { color: var(--accent); }
+
+  .shot {
+    margin: clamp(36px, 7vw, 60px) 0 0;
+    display: flex;
+    justify-content: center;
+  }
+  .shot img {
+    width: 340px;
+    max-width: 100%;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(122, 162, 247, 0.08);
+  }
+
+  section { margin-top: clamp(52px, 9vw, 84px); }
+  h2 {
+    font-family: var(--mono);
+    font-weight: 700;
+    font-size: 13px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--dim);
+    margin: 0 0 20px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .why { display: grid; gap: 20px; }
+  .why > div { }
+  .why h3 {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--ink-strong);
+    margin: 0 0 4px;
+  }
+  .why p { margin: 0; color: var(--dim); font-size: 14px; }
+  .why em { color: var(--ink); font-style: normal; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  td { padding: 11px 0; border-bottom: 1px solid var(--line); vertical-align: top; }
+  tr:last-child td { border-bottom: none; }
+  td:first-child { width: 42%; padding-right: 18px; color: var(--ink-strong); font-weight: 500; }
+  td:last-child { color: var(--dim); }
+  td .k { font-family: var(--mono); font-size: 12px; color: var(--faint); }
+
+  .flow { display: grid; gap: 14px; }
+  .flow > div {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 14px;
+    align-items: start;
+    font-size: 14px;
+    color: var(--dim);
+  }
+  .flow .n {
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--accent);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    flex: none;
+  }
+  .flow code {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 1px 5px;
+    font-size: 11.5px;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  .tests p { color: var(--dim); font-size: 14px; margin: 0 0 16px; }
+  .layers { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; }
+  .layer {
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 13px 14px;
+    background: var(--surface);
+  }
+  .layer .t { font-family: var(--mono); font-size: 12px; color: var(--ink-strong); margin: 0 0 3px; }
+  .layer .d { font-size: 12.5px; color: var(--dim); margin: 0; }
+
+  pre {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 9px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    color: var(--ink);
+    margin: 16px 0 0;
+  }
+  pre .c { color: var(--faint); }
+
+  .contribute p { color: var(--dim); font-size: 14px; }
+  .contribute ul { padding-left: 18px; color: var(--dim); font-size: 14px; }
+  .contribute li { margin: 6px 0; }
+
+  footer {
+    margin-top: clamp(60px, 10vw, 96px);
+    padding-top: 22px;
+    border-top: 1px solid var(--line);
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--faint);
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .cta button { transition: color .12s, background .12s; }
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <p class="eyebrow">Omarchy · bar plugin</p>
+  <h1>Magic Trackpad</h1>
+  <p class="tagline"><strong>Your trackpad, tuned from the bar.</strong> The
+  libinput touchpad knobs Hyprland already has — one click away, applied live,
+  fully reversible.</p>
+
+  <div class="cta">
+    <code id="install"><span class="prompt">$</span>omarchy plugin add https://github.com/andrewmp1/omarchy-magic-trackpad.git --enable --yes</code>
+    <button id="copy" type="button" aria-label="Copy install command">Copy</button>
+  </div>
+
+  <p class="meta">
+    <span>MIT</span>
+    <span>Omarchy 4 · Hyprland 0.56</span>
+    <span>no daemon · no root</span>
+    <span><a href="https://github.com/andrewmp1/omarchy-magic-trackpad">GitHub&nbsp;↗</a></span>
+  </p>
+
+  <div class="shot">
+    <img src="screenshots/panel.png" width="340"
+         alt="The Magic Trackpad panel open in the Omarchy bar: a Trackpad header, six labeled toggle switches, and a Slow / Normal / Fast scroll-speed control.">
+  </div>
+
+  <section>
+    <h2>Why</h2>
+    <div class="why">
+      <div>
+        <h3>The trackpad pane Omarchy doesn't ship</h3>
+        <p>Tap-to-click, two-finger right-click, natural scroll, scroll speed,
+        disable-while-typing — the settings everyone changes, in a panel instead
+        of a text file.</p>
+      </div>
+      <div>
+        <h3>Instant</h3>
+        <p>Flip a switch and libinput reacts <em>now</em> — the panel talks to
+        the running Hyprland with <code>hl.config</code>, not a config reload.</p>
+      </div>
+      <div>
+        <h3>Persistent and reversible</h3>
+        <p>Choices go to one JSON file and a managed <code>~/.config/hypr/*.lua</code>
+        that Hyprland sources on every load. Remove the plugin, delete two files —
+        your config is byte-for-byte back.</p>
+      </div>
+      <div>
+        <h3>Reads your real state</h3>
+        <p>Options you've never touched show Hyprland's current value; the plugin
+        only writes the ones you actually change.</p>
+      </div>
+      <div>
+        <h3>Native to the bar</h3>
+        <p>Themed by your Omarchy theme, keyboard-navigable
+        (<code>j</code>/<code>k</code>, <code>Enter</code>, <code>Esc</code>), and
+        it does not spawn a second Quickshell.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>What it controls</h2>
+    <table>
+      <tr><td>Tap to click</td><td>tap the pad instead of pressing down</td></tr>
+      <tr><td>Two-finger right-click</td><td>2 fingers → right, 3 → middle <span class="k">clickfinger_behavior</span></td></tr>
+      <tr><td>Natural scroll</td><td>content follows the fingers</td></tr>
+      <tr><td>Disable while typing</td><td>ignore the pad briefly after a keypress</td></tr>
+      <tr><td>Tap and drag</td><td>tap-tap-hold to start a drag</td></tr>
+      <tr><td>Middle-click emulation</td><td>left + right together → middle</td></tr>
+      <tr><td>Scroll speed</td><td>Slow · Normal · Fast <span class="k">scroll_factor 0.2 / 0.4 / 0.8</span></td></tr>
+    </table>
+  </section>
+
+  <section>
+    <h2>How it works</h2>
+    <div class="flow">
+      <div><span class="n">1</span><span>Your settings live in <code>~/.config/omarchy/magic-trackpad.json</code> — plain JSON you can read, diff, and keep in your dotfiles.</span></div>
+      <div><span class="n">2</span><span>A change is applied live with <code>hyprctl eval "hl.config({ input = { touchpad = { … } } })"</code>. Omarchy runs Hyprland's Lua parser, which rejects <code>hyprctl keyword</code>.</span></div>
+      <div><span class="n">3</span><span>The same change lands in <code>~/.config/hypr/omarchy-magic-trackpad.lua</code>, loaded by one guarded <code>dofile</code> line the plugin appends to <code>hyprland.lua</code> — so it survives a restart.</span></div>
+    </div>
+  </section>
+
+  <section class="tests">
+    <h2>Tested</h2>
+    <p>Six layers, run by <code>bash scripts/check.sh</code>. Layers 1–3 run in
+    CI on every push; 4–6 need a live Omarchy desktop.</p>
+    <div class="layers">
+      <div class="layer"><p class="t">1 · unit</p><p class="d">config normalization, the exact <code>hl.config</code> strings, the apply plan</p></div>
+      <div class="layer"><p class="t">2 · manifest</p><p class="d">schema + <code>Panel.qml</code> stays in step with the plugin id</p></div>
+      <div class="layer"><p class="t">3 · lua syntax</p><p class="d">the generated <code>.lua</code> is parsed with <code>luac</code></p></div>
+      <div class="layer"><p class="t">4 · hyprland contract</p><p class="d">each setting, applied with the plugin's own command, actually moves <code>hyprctl getoption</code></p></div>
+      <div class="layer"><p class="t">5 · shell smoke</p><p class="d">the plugin loads into a running <code>omarchy-shell</code> with no QML error</p></div>
+      <div class="layer"><p class="t">6 · panel e2e</p><p class="d">synthetic keystrokes drive the rendered panel; the real option, the document, and persistence are all checked</p></div>
+    </div>
+    <pre><span class="c"># the full menu + a manual release checklist</span>
+<a href="https://github.com/andrewmp1/omarchy-magic-trackpad/blob/main/docs/TESTING.md">docs/TESTING.md</a></pre>
+  </section>
+
+  <section class="contribute">
+    <h2>Contribute</h2>
+    <p>Issues and PRs welcome — the bar is low.</p>
+    <ul>
+      <li><strong>Bug?</strong> <a href="https://github.com/andrewmp1/omarchy-magic-trackpad/issues/new/choose">Open an issue</a> with the template — <code>omarchy version</code>, <code>hyprctl version</code>, and <code>scripts/check.sh</code> output.</li>
+      <li><strong>Feature?</strong> If it's a touchpad option Hyprland already exposes, it's usually a few lines in <code>Model.js</code>.</li>
+      <li><strong>PR?</strong> Read <a href="https://github.com/andrewmp1/omarchy-magic-trackpad/blob/main/CONTRIBUTING.md">CONTRIBUTING.md</a> and <a href="https://github.com/andrewmp1/omarchy-magic-trackpad/blob/main/AGENTS.md">AGENTS.md</a>, run <code>bash scripts/check.sh</code>, keep <code>Model.js</code> pure.</li>
+    </ul>
+  </section>
+
+  <footer>
+    <span><a href="https://github.com/andrewmp1/omarchy-magic-trackpad">github.com/andrewmp1/omarchy-magic-trackpad</a></span>
+    <span><a href="https://omarchy.org/">omarchy.org</a></span>
+    <span>MIT © 2026 Drew Purdy</span>
+  </footer>
+
+</main>
+
+<script>
+  (function () {
+    var btn = document.getElementById("copy");
+    var cmd = document.getElementById("install").textContent.replace(/^\$\s*/, "");
+    btn.addEventListener("click", function () {
+      navigator.clipboard.writeText(cmd).then(function () {
+        btn.textContent = "Copied";
+        btn.classList.add("copied");
+        setTimeout(function () { btn.textContent = "Copy"; btn.classList.remove("copied"); }, 1600);
+      }).catch(function () {
+        btn.textContent = "Ctrl-C";
+        setTimeout(function () { btn.textContent = "Copy"; }, 1600);
+      });
+    });
+  })();
+</script>
+</body>
+</html>

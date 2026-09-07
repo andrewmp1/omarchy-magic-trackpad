@@ -1,0 +1,29 @@
+name: Feature request
+description: A touchpad setting or panel behaviour you'd like added.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like?
+      placeholder: Expose `input:touchpad:drag_lock` so a drag survives a brief finger lift.
+    validations:
+      required: true
+  - type: input
+    id: option
+    attributes:
+      label: Hyprland option (if you know it)
+      description: "Check with `hyprctl getoption input:touchpad:<name>`."
+      placeholder: input:touchpad:drag_lock
+    validations:
+      required: false
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Does it need more than a libinput setting?
+      options:
+        - "No — just a Hyprland option toggle"
+        - "Yes — needs a daemon / device access (haptics / custom gestures phase)"
+        - "Not sure"
+    validations:
+      required: true
