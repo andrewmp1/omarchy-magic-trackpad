@@ -35,46 +35,71 @@ test("parseGetOption reads bool/int/float/str and unset", () => {
   assert.equal(M.parseGetOption(""), null)
 })
 
-test("applyPlan emits only set toggles / scroll / enabled gestures", () => {
+test("configLua builds an hl.config nested table", () => {
+  assert.equal(
+    M.configLua({ natural_scroll: false }),
+    "hl.config({ input = { touchpad = { natural_scroll = false } } })"
+  )
+  const a = M.configEvalArgs({ scroll_factor: 0.8 })
+  assert.deepEqual(a, ["hyprctl", "eval", "hl.config({ input = { touchpad = { scroll_factor = 0.8 } } })"])
+  assert.deepEqual(
+    M.toggleEvalArgs("tap_to_click", true),
+    ["hyprctl", "eval", "hl.config({ input = { touchpad = { tap_to_click = true } } })"]
+  )
+})
+
+test("gestureLua / gestureEvalArgs", () => {
+  assert.equal(
+    M.gestureLua(4, "horizontal", "workspace"),
+    'hl.gesture({ fingers = 4, direction = "horizontal", action = "workspace" })'
+  )
+  assert.equal(M.gestureEvalArgs(3, "horizontal", "workspace")[1], "eval")
+})
+
+test("applyPlan batches touchpad+scroll into one eval, gestures separate", () => {
   const plan = M.applyPlan({
     touchpad: { tapToClick: true, twoFingerRight: false },
     scrollSpeed: "fast",
     gestures: { workspaceSwipe: { enabled: true, fingers: 4 } }
   })
-  const flat = plan.map((a) => a.join(" "))
-  assert.ok(flat.includes("hyprctl keyword input:touchpad:tap-to-click true"))
-  assert.ok(flat.includes("hyprctl keyword input:touchpad:clickfinger_behavior false"))
-  assert.ok(flat.some((l) => l.startsWith("hyprctl keyword input:touchpad:scroll_factor 0.8")))
-  assert.ok(flat.includes("hyprctl keyword gesture 4, horizontal, workspace"))
-  assert.ok(!flat.some((l) => l.includes("natural_scroll"))) // never set
+  assert.equal(plan.length, 2)
+  assert.ok(plan[0][2].includes("tap_to_click = true"))
+  assert.ok(plan[0][2].includes("clickfinger_behavior = false"))
+  assert.ok(plan[0][2].includes("scroll_factor = 0.8"))
+  assert.ok(plan[1][2].includes("fingers = 4"))
 
-  // Nothing set anywhere -> empty plan (inherit everything).
-  assert.equal(M.applyPlan({}).length, 0)
+  assert.equal(M.applyPlan({}).length, 0) // nothing set -> inherit everything
 })
 
 test("loader line is idempotent and marker-guarded", () => {
-  const empty = ""
-  const once = M.withLoader(empty)
+  const once = M.withLoader("")
   assert.ok(once.includes("omarchy-magic-trackpad"))
+  assert.ok(once.includes("pcall(dofile"))
   assert.equal(M.needsLoader(once), false)
   assert.equal(M.withLoader(once), once) // second call is a no-op
 })
 
-test("generateLua emits hl.keyword for set toggles and hl.gesture when enabled", () => {
+test("generateLua emits hl.config / hl.gesture; default is a no-op stub", () => {
   const lua = M.generateLua({
     touchpad: { tapToClick: true },
     scrollSpeed: "slow",
     gestures: { workspaceSwipe: { enabled: true, fingers: 3 } }
   })
-  assert.ok(lua.includes('hl.keyword("input:touchpad:tap-to-click", "true")'))
-  assert.ok(lua.includes('hl.keyword("input:touchpad:scroll_factor", "0.2")'))
-  assert.ok(lua.includes('fingers = 3, direction = "horizontal", action = "workspace"'))
+  assert.ok(lua.includes("hl.config({ input = { touchpad = { tap_to_click = true, scroll_factor = 0.2 } } })"))
+  assert.ok(lua.includes('hl.gesture({ fingers = 3, direction = "horizontal", action = "workspace" })'))
   assert.ok(!lua.includes("natural_scroll"))
 
-  // Default config -> a guarded stub that touches nothing.
   const stub = M.generateLua(M.defaultConfig())
-  assert.ok(!stub.includes("hl.keyword"))
+  assert.ok(!stub.includes("hl.config"))
   assert.ok(!stub.includes("hl.gesture"))
+  assert.ok(stub.includes('if type(hl) ~= "table" then return end'))
+})
+
+test("effectiveToggle / effectiveScroll fall back to live only when unset", () => {
+  assert.equal(M.effectiveToggle({}, { naturalScroll: true }, "naturalScroll"), true)
+  assert.equal(M.effectiveToggle({ touchpad: { naturalScroll: false } }, { naturalScroll: true }, "naturalScroll"), false)
+  assert.equal(M.effectiveScroll({}, { scrollSpeed: "fast" }), "fast")
+  assert.equal(M.effectiveScroll({ scrollSpeed: "slow" }, { scrollSpeed: "fast" }), "slow")
 })
 
 test("summaryLine reads back the enabled bits", () => {

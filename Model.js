@@ -3,32 +3,37 @@
 //
 // Level 1 only: the libinput touchpad options Hyprland already exposes, plus
 // finger-swipe gestures. The plugin's own JSON document is the source of
-// truth; `hyprctl getoption` is read once to seed first-run defaults.
+// truth; `hyprctl getoption` is read to show the state of an option the user
+// has not set yet.
+//
+// Omarchy runs Hyprland's Lua config parser, so runtime changes go through
+// `hyprctl eval "hl.config{...}"` / `"hl.gesture{...}"` — `hyprctl keyword`
+// is rejected ("can't work with non-legacy parsers"). Reads still use
+// `hyprctl getoption -j`, which works either way.
 
 // ---------------------------------------------------------------- catalogue
 
-// Each touchpad toggle: the Hyprland option, how `hyprctl keyword` wants the
-// value, and the human label. `invert` means the stored/displayed boolean is
-// the opposite of the Hyprland option (so the UI can say "Disable while
-// typing" for the option named `disable_while_typing`, both true = on).
+// `option` is the `getoption` path (underscores; Hyprland accepts them).
+// `field` is the key inside `hl.config{ input = { touchpad = { ... } } }`.
 var TOUCHPAD_TOGGLES = [
-  { key: "tapToClick",        option: "input:touchpad:tap-to-click",         label: "Tap to click",            help: "Tap the pad to click without pressing down." },
-  { key: "twoFingerRight",    option: "input:touchpad:clickfinger_behavior", label: "Two-finger right-click",   help: "Two fingers = right click, three = middle. Off uses corner zones." },
-  { key: "naturalScroll",     option: "input:touchpad:natural_scroll",       label: "Natural scroll",          help: "Content follows the fingers, like a phone." },
-  { key: "disableWhileTyping",option: "input:touchpad:disable_while_typing", label: "Disable while typing",     help: "Ignore the pad for a moment after a keypress." },
-  { key: "tapAndDrag",        option: "input:touchpad:tap-and-drag",         label: "Tap and drag",            help: "Tap-tap-hold to start dragging." },
-  { key: "middleClickPaste",  option: "input:touchpad:middle_button_emulation", label: "Middle-click emulation", help: "Left + right together acts as a middle click." }
+  { key: "tapToClick",         field: "tap_to_click",             option: "input:touchpad:tap_to_click",             label: "Tap to click",          help: "Tap the pad to click without pressing down." },
+  { key: "twoFingerRight",     field: "clickfinger_behavior",     option: "input:touchpad:clickfinger_behavior",     label: "Two-finger right-click", help: "Two fingers = right click, three = middle. Off uses corner zones." },
+  { key: "naturalScroll",      field: "natural_scroll",           option: "input:touchpad:natural_scroll",           label: "Natural scroll",        help: "Content follows the fingers, like a phone." },
+  { key: "disableWhileTyping", field: "disable_while_typing",      option: "input:touchpad:disable_while_typing",     label: "Disable while typing",   help: "Ignore the pad for a moment after a keypress." },
+  { key: "tapAndDrag",         field: "tap_and_drag",             option: "input:touchpad:tap_and_drag",             label: "Tap and drag",          help: "Tap-tap-hold to start dragging." },
+  { key: "middleClickPaste",   field: "middle_button_emulation",  option: "input:touchpad:middle_button_emulation",  label: "Middle-click emulation", help: "Left + right together acts as a middle click." }
 ]
 
-// Scroll speed is a float; expose it as three named stops.
+// Scroll speed is a float (`input.touchpad.scroll_factor`); three named stops.
+var SCROLL_FIELD = "scroll_factor"
+var SCROLL_OPTION = "input:touchpad:scroll_factor"
 var SCROLL_STOPS = [
   { key: "slow",   value: 0.2, label: "Slow" },
   { key: "normal", value: 0.4, label: "Normal" },
   { key: "fast",   value: 0.8, label: "Fast" }
 ]
 
-// Finger-swipe gesture. Hyprland 0.51+ registers these with the `gesture`
-// keyword: `gesture = <fingers>, <direction>, <action>`.
+// Finger-swipe gesture (Hyprland 0.51+ `hl.gesture{ fingers, direction, action }`).
 var GESTURES = [
   {
     key: "workspaceSwipe",
@@ -79,7 +84,7 @@ function normalizeConfig(doc) {
 
 // -------------------------------------------------------------- hyprctl I/O
 
-// `hyprctl -j getoption <name>` → the current value, or null if unset/absent.
+// `hyprctl -j getoption <name>` → current value, or null if unset/absent.
 function parseGetOption(raw) {
   try {
     var json = JSON.parse(String(raw || "").trim() || "{}")
@@ -93,40 +98,62 @@ function parseGetOption(raw) {
   }
 }
 
-function boolWord(v) { return v ? "true" : "false" }
-
-// Live-apply commands for one setting change. Returns an array of argv arrays
-// for `hyprctl` (the caller runs each). Gestures can't be read back or
-// unset cleanly at runtime, so toggling one off asks for a full reload.
-function keywordArgs(option, value) {
-  return ["hyprctl", "keyword", option, String(value)]
-}
-
 function scrollStopValue(key) {
   for (var i = 0; i < SCROLL_STOPS.length; i++) if (SCROLL_STOPS[i].key === key) return SCROLL_STOPS[i].value
   return 0.4
 }
 
-function gestureKeywordArgs(fingers, direction, action) {
-  return ["hyprctl", "keyword", "gesture", fingers + ", " + direction + ", " + action]
+// Minimal Lua-literal for the value types we emit (bool, number).
+function luaValue(v) {
+  if (v === true) return "true"
+  if (v === false) return "false"
+  return String(Number(v))
 }
 
-// Every live command to reconcile Hyprland with `cfg` (used on first apply
-// and after a settings import).
+// `assign` is { field: value, ... } for input.touchpad.*.
+function configLua(assign) {
+  var parts = []
+  for (var k in assign) parts.push(k + " = " + luaValue(assign[k]))
+  return "hl.config({ input = { touchpad = { " + parts.join(", ") + " } } })"
+}
+
+function configEvalArgs(assign) {
+  return ["hyprctl", "eval", configLua(assign)]
+}
+
+// One touchpad field change (used on each click).
+function toggleEvalArgs(field, value) {
+  var a = {}
+  a[field] = value
+  return configEvalArgs(a)
+}
+
+function gestureLua(fingers, direction, action) {
+  return 'hl.gesture({ fingers = ' + Number(fingers) +
+    ', direction = "' + direction + '", action = "' + action + '" })'
+}
+
+function gestureEvalArgs(fingers, direction, action) {
+  return ["hyprctl", "eval", gestureLua(fingers, direction, action)]
+}
+
+// Every command to reconcile Hyprland with `cfg` — one batched `hl.config`
+// for the touchpad + scroll, then one `hl.gesture` per enabled gesture.
 function applyPlan(cfg) {
-  var plan = []
   var c = normalizeConfig(cfg)
+  var assign = {}
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) {
     var t = TOUCHPAD_TOGGLES[i]
-    if (c.touchpad[t.key] === true || c.touchpad[t.key] === false) {
-      plan.push(keywordArgs(t.option, boolWord(c.touchpad[t.key])))
-    }
+    if (c.touchpad[t.key] === true || c.touchpad[t.key] === false) assign[t.field] = c.touchpad[t.key]
   }
-  if (c.scrollSpeed) plan.push(keywordArgs("input:touchpad:scroll_factor", scrollStopValue(c.scrollSpeed)))
+  if (c.scrollSpeed) assign[SCROLL_FIELD] = scrollStopValue(c.scrollSpeed)
+
+  var plan = []
+  if (Object.keys(assign).length > 0) plan.push(configEvalArgs(assign))
   for (var g = 0; g < GESTURES.length; g++) {
     var def = GESTURES[g]
     var gv = c.gestures[def.key]
-    if (gv && gv.enabled) plan.push(gestureKeywordArgs(gv.fingers, def.direction, def.action))
+    if (gv && gv.enabled) plan.push(gestureEvalArgs(gv.fingers, def.direction, def.action))
   }
   return plan
 }
@@ -134,7 +161,7 @@ function applyPlan(cfg) {
 // ---------------------------------------------------------------- persistence
 
 var LOADER_MARK = "omarchy-magic-trackpad"
-var LOADER_LINE = 'if os.getenv and true then pcall(dofile, (os.getenv("HOME") or "") .. "/.config/hypr/omarchy-magic-trackpad.lua") end'
+var LOADER_LINE = 'pcall(dofile, (os.getenv("HOME") or "") .. "/.config/hypr/omarchy-magic-trackpad.lua")'
 
 function needsLoader(hyprlandLua) {
   return String(hyprlandLua || "").indexOf(LOADER_MARK) === -1
@@ -148,34 +175,28 @@ function withLoader(hyprlandLua) {
 }
 
 // The managed Lua file: applied by Hyprland on every config load, so the
-// settings survive a restart. Uses `hl.keyword` / `hl.gesture` — the same
-// API Omarchy's own hyprland.lua uses.
+// settings survive a restart. Same `hl.config` / `hl.gesture` calls Omarchy's
+// own hyprland.lua uses.
 function generateLua(cfg) {
   var c = normalizeConfig(cfg)
   var out = [
     "-- " + LOADER_MARK + " — generated by the Magic Trackpad Omarchy plugin.",
     "-- Source of truth is ~/.config/omarchy/magic-trackpad.json. Safe to delete;",
     "-- the plugin rewrites this on the next change.",
-    "local ok, hl_ = pcall(function() return hl end)",
-    "if not ok or not hl_ then return end"
+    "if type(hl) ~= \"table\" then return end"
   ]
+  var assign = {}
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) {
     var t = TOUCHPAD_TOGGLES[i]
-    var v = c.touchpad[t.key]
-    if (v === true || v === false) {
-      out.push('hl.keyword("' + t.option + '", "' + boolWord(v) + '")')
-    }
+    if (c.touchpad[t.key] === true || c.touchpad[t.key] === false) assign[t.field] = c.touchpad[t.key]
   }
-  if (c.scrollSpeed) {
-    out.push('hl.keyword("input:touchpad:scroll_factor", "' + scrollStopValue(c.scrollSpeed) + '")')
-  }
+  if (c.scrollSpeed) assign[SCROLL_FIELD] = scrollStopValue(c.scrollSpeed)
+  if (Object.keys(assign).length > 0) out.push(configLua(assign))
+
   for (var g = 0; g < GESTURES.length; g++) {
     var def = GESTURES[g]
     var gv = c.gestures[def.key]
-    if (gv && gv.enabled) {
-      out.push('pcall(function() hl.gesture({ fingers = ' + gv.fingers +
-        ', direction = "' + def.direction + '", action = "' + def.action + '" }) end)')
-    }
+    if (gv && gv.enabled) out.push("pcall(function() " + gestureLua(gv.fingers, def.direction, def.action) + " end)")
   }
   return out.join("\n") + "\n"
 }
@@ -218,13 +239,18 @@ if (typeof module !== "undefined") {
   module.exports = {
     TOUCHPAD_TOGGLES: TOUCHPAD_TOGGLES,
     SCROLL_STOPS: SCROLL_STOPS,
+    SCROLL_FIELD: SCROLL_FIELD,
+    SCROLL_OPTION: SCROLL_OPTION,
     GESTURES: GESTURES,
     defaultConfig: defaultConfig,
     normalizeConfig: normalizeConfig,
     parseGetOption: parseGetOption,
-    keywordArgs: keywordArgs,
-    gestureKeywordArgs: gestureKeywordArgs,
     scrollStopValue: scrollStopValue,
+    configLua: configLua,
+    configEvalArgs: configEvalArgs,
+    toggleEvalArgs: toggleEvalArgs,
+    gestureLua: gestureLua,
+    gestureEvalArgs: gestureEvalArgs,
     applyPlan: applyPlan,
     needsLoader: needsLoader,
     withLoader: withLoader,

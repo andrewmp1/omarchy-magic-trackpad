@@ -5,8 +5,8 @@ import "Model.js" as Model
 
 // Bar button + popup for touchpad behaviour and finger-swipe gestures.
 // Level 1: everything here is a plain libinput / Hyprland setting, applied
-// live with `hyprctl keyword` and persisted to a managed Lua file. No daemon,
-// no elevated permissions.
+// live with `hyprctl eval "hl.config{...}"` and persisted to a managed Lua file.
+// No daemon, no elevated permissions.
 Panel {
   id: root
   moduleName: "andrewmp1.magic-trackpad"
@@ -30,7 +30,7 @@ Panel {
     var items = []
     for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++) {
       var t = Model.TOUCHPAD_TOGGLES[i]
-      items.push({ kind: "toggle", key: t.key, option: t.option, label: t.label })
+      items.push({ kind: "toggle", key: t.key, field: t.field, label: t.label })
     }
     items.push({ kind: "scroll" })
     for (var g = 0; g < Model.GESTURES.length; g++) {
@@ -55,7 +55,7 @@ Panel {
     if (!cursorActive) { cursorActive = true; return }
     var item = navItems[cursorIndex]
     if (!item) return
-    if (item.kind === "toggle") setToggle(item.key, item.option, !Model.effectiveToggle(cfg, sync.liveValues, item.key))
+    if (item.kind === "toggle") setToggle(item.key, item.field, !Model.effectiveToggle(cfg, sync.liveValues, item.key))
     else if (item.kind === "scroll") cycleScroll()
     else if (item.kind === "gesture") setGesture(item.key, !(cfg.gestures[item.key] && cfg.gestures[item.key].enabled))
     else if (item.kind === "fingers") cycleFingers(item.key)
@@ -63,9 +63,9 @@ Panel {
 
   // ------------------------------------------------------------- mutations
 
-  function setToggle(key, option, value) {
+  function setToggle(key, field, value) {
     store.mutate(function (d) { d.touchpad[key] = value })
-    sync.runOne(Model.keywordArgs(option, value ? "true" : "false"))
+    sync.runOne(Model.toggleEvalArgs(field, value))
     sync.writeManaged(store.config)
     flash(value ? "On" : "Off")
   }
@@ -75,7 +75,7 @@ Panel {
     var idx = Math.max(0, order.indexOf(Model.effectiveScroll(cfg, sync.liveValues)))
     var next = order[(idx + 1) % order.length]
     store.mutate(function (d) { d.scrollSpeed = next })
-    sync.runOne(Model.keywordArgs("input:touchpad:scroll_factor", Model.scrollStopValue(next)))
+    sync.runOne(Model.toggleEvalArgs(Model.SCROLL_FIELD, Model.scrollStopValue(next)))
     sync.writeManaged(store.config)
     flash("Scroll: " + next)
   }
@@ -91,7 +91,7 @@ Panel {
     })
     sync.writeManaged(store.config)
     if (enabled) {
-      sync.runOne(Model.gestureKeywordArgs(fingers, def.direction, def.action))
+      sync.runOne(Model.gestureEvalArgs(fingers, def.direction, def.action))
       flash("Swipe on")
     } else {
       // A registered gesture can't be un-registered at runtime; reload the
@@ -266,7 +266,7 @@ Panel {
                 hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
                   && root.navItems[root.cursorIndex].kind === "toggle"
                   && root.navItems[root.cursorIndex].key === modelData.key
-                onClicked: root.setToggle(modelData.key, modelData.option, !Model.effectiveToggle(root.cfg, sync.liveValues, modelData.key))
+                onClicked: root.setToggle(modelData.key, modelData.field, !Model.effectiveToggle(root.cfg, sync.liveValues, modelData.key))
                 onHovered: function (h) {
                   if (h) {
                     root.cursorActive = true
