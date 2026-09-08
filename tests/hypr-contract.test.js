@@ -67,6 +67,35 @@ test("live: scroll_factor takes a float via the plugin's command", opts, () => {
   }
 })
 
+test("live: sensitivity is an `input`-level key, applied via the plugin's command", opts, () => {
+  const before = Number(getOpt(M.POINTER_OPTION))
+  const restore = Number.isFinite(before) ? before : 0
+  const lua = M.toggleEvalArgs(M.POINTER_FIELD, -0.3, M.POINTER_LEVEL)[2]
+  assert.equal(lua, 'hl.config({ input = { sensitivity = -0.3 } })', "wrong Lua for an input-level key")
+  try {
+    assert.equal(evalLua(lua).out, "ok")
+    assert.ok(Math.abs(Number(getOpt(M.POINTER_OPTION)) - -0.3) < 1e-6, "sensitivity did not become -0.3")
+  } finally {
+    evalLua(M.toggleEvalArgs(M.POINTER_FIELD, restore, M.POINTER_LEVEL)[2])
+  }
+})
+
+for (const es of M.ENUM_SETTINGS) {
+  test(`live: ${es.field} enum values apply and move getoption`, opts, () => {
+    const before = getOpt(es.option)
+    try {
+      for (const v of es.values) {
+        const lua = M.toggleEvalArgs(es.field, M.enumValue(es.key, v.key), es.level)[2]
+        assert.equal(evalLua(lua).out, "ok", `eval failed: ${lua}`)
+        assert.equal(getOpt(es.option), v.lua, `${es.option} did not become ${v.lua}`)
+      }
+    } finally {
+      // Empty string clears a Hyprland string option back to its default.
+      evalLua(M.toggleEvalArgs(es.field, before == null ? "" : before, es.level)[2])
+    }
+  })
+}
+
 // Per-device: hl.device({ name = ... }) has no getoption readback, so the
 // contract here is narrower — the command Hyprland accepts is "ok" and does
 // not error. Runs only when a real touchpad is detected.

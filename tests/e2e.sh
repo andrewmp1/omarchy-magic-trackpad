@@ -98,6 +98,9 @@ for o in tap_to_click clickfinger_behavior natural_scroll disable_while_typing t
   ORIG[$o]="$(getb "$o")"
 done
 ORIG[scroll_factor]="$(getf scroll_factor)"
+ORIG[sensitivity]="$(hyprctl getoption -j input:sensitivity | jq -r 'if has("float") then (.float|tostring) else "0" end')"
+ORIG[accel_profile]="$(hyprctl getoption -j input:accel_profile | jq -r 'if has("str") and .str != "[[EMPTY]]" then .str else "" end')"
+ORIG[scroll_method]="$(hyprctl getoption -j input:scroll_method | jq -r 'if has("str") and .str != "[[EMPTY]]" then .str else "" end')"
 HAD_CFG=0; [ -f "$CFG" ] && { HAD_CFG=1; cp "$CFG" "$CFG.e2ebak"; }
 
 restore() {
@@ -106,6 +109,7 @@ restore() {
     [ -n "${ORIG[$o]}" ] && setb "$o" "${ORIG[$o]}"
   done
   [ -n "${ORIG[scroll_factor]}" ] && setf scroll_factor "${ORIG[scroll_factor]}"
+  hyprctl eval "hl.config({ input = { sensitivity = ${ORIG[sensitivity]:-0}, accel_profile = \"${ORIG[accel_profile]}\", scroll_method = \"${ORIG[scroll_method]}\" } })" >/dev/null 2>&1
   # Pin any device we touched back to the original global values.
   if [ -n "$DEV" ]; then
     hyprctl eval "hl.device({ name = \"$DEV\", natural_scroll = ${ORIG[natural_scroll]:-false}, scroll_factor = ${ORIG[scroll_factor]:-0.4} })" >/dev/null 2>&1
@@ -156,6 +160,25 @@ if [ -n "$a3" ] && [ "$a3" != "$b3" ]; then
   say "segmented scroll control: scroll_factor $b3 -> $a3  ok"
 else
   say "scroll_factor did not change ($b3 -> $a3)"; fail=1
+fi
+
+# --- test 3b: pointer speed (an `input`-level key). Keeps test 3's scroll
+#     change on disk so test 4 still has an hl.config to reload.
+pb="$(hyprctl getoption -j input:sensitivity | jq -r 'if has("float") then (.float|tostring) else "" end')"
+open_panel
+nav $((BASE + 8)); activate            # scope + 6 toggles + scroll + scrollMethod -> pointer
+pa="$(hyprctl getoption -j input:sensitivity | jq -r 'if has("float") then (.float|tostring) else "" end')"
+close_panel
+if [ -n "$pa" ] && [ "$pa" != "$pb" ]; then
+  say "pointer speed: input:sensitivity $pb -> $pa  ok"
+  [ -f "$CFG" ] && [ "$(jq -r '.global.pointerSpeed' "$CFG")" != "null" ] \
+    && say "pointerSpeed written to the document: ok" \
+    || { say "pointerSpeed missing from magic-trackpad.json"; fail=1; }
+  grep -q "sensitivity" "$LUA" 2>/dev/null \
+    && say "managed .lua carries sensitivity: ok" \
+    || { say "managed .lua missing sensitivity"; fail=1; }
+else
+  say "input:sensitivity did not change ($pb -> $pa)"; fail=1
 fi
 
 # --- test 4: persistence — the managed .lua re-applies after `hyprctl reload`

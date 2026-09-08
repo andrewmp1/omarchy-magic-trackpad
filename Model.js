@@ -37,6 +37,51 @@ var SCROLL_STOPS = [
   { key: "fast",   value: 0.8, label: "Fast" }
 ]
 
+// Pointer speed is libinput `sensitivity`, −1..1, 0 = system default. In a
+// global `hl.config` it sits one level up from `touchpad` (under `input`
+// directly); in an `hl.device` block it is a flat key like everything else.
+// Hyprland does NOT clamp it, so pointerStopValue() does.
+var POINTER_FIELD = "sensitivity"
+var POINTER_LEVEL = "input"
+var POINTER_OPTION = "input:sensitivity"
+var POINTER_STOPS = [
+  { key: "slowest", value: -0.6, label: "Slowest" },
+  { key: "slow",    value: -0.3, label: "Slow" },
+  { key: "default", value: 0,    label: "Default" },
+  { key: "fast",    value: 0.35, label: "Fast" },
+  { key: "fastest", value: 0.7,  label: "Fastest" }
+]
+
+// Small string-enum settings: one Lua string field, a closed value allow-list
+// (values NEVER come from user input — they are picked from this table by
+// key). `level` says where the field nests in a global `hl.config`:
+//   "input"    -> hl.config({ input = { <field> = … } })
+//   "touchpad" -> hl.config({ input = { touchpad = { <field> = … } } })
+// A device scope is always flat: hl.device({ name = …, <field> = … }).
+// `section` places the control in the panel and the keyboard-nav order:
+// "scroll" (with scroll speed), "pointer" (with pointer speed), "touchpad"
+// (with the toggle rows).
+var ENUM_SETTINGS = [
+  {
+    key: "accelProfile", field: "accel_profile", level: "input", section: "pointer",
+    option: "input:accel_profile", label: "Pointer acceleration",
+    help: "Adaptive ramps with speed; Flat is 1:1.",
+    values: [
+      { key: "adaptive", lua: "adaptive", label: "Adaptive" },
+      { key: "flat",     lua: "flat",     label: "Flat" }
+    ]
+  },
+  {
+    key: "scrollMethod", field: "scroll_method", level: "input", section: "scroll",
+    option: "input:scroll_method", label: "Scroll method",
+    help: "Two-finger drag anywhere, or drag along the right edge.",
+    values: [
+      { key: "2fg",  lua: "2fg",  label: "Two-finger" },
+      { key: "edge", lua: "edge", label: "Edge" }
+    ]
+  }
+]
+
 var GLOBAL = "global"
 
 // Finger-swipe gestures are DEFERRED to v0.3. `GESTURES` stays empty and a
@@ -98,8 +143,9 @@ function deviceLabel(name) {
 // ---------------------------------------------------------------- document
 
 function emptyEntry() {
-  var e = { touchpad: {}, scrollSpeed: null }
+  var e = { touchpad: {}, scrollSpeed: null, pointerSpeed: null }
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) e.touchpad[TOUCHPAD_TOGGLES[i].key] = null
+  for (var j = 0; j < ENUM_SETTINGS.length; j++) e[ENUM_SETTINGS[j].key] = null
   return e
 }
 
@@ -139,6 +185,13 @@ function normalizeEntry(e) {
   }
   out.scrollSpeed = SCROLL_STOPS.some(function (s) { return s.key === src.scrollSpeed })
     ? src.scrollSpeed : null
+  out.pointerSpeed = POINTER_STOPS.some(function (s) { return s.key === src.pointerSpeed })
+    ? src.pointerSpeed : null
+  for (var j = 0; j < ENUM_SETTINGS.length; j++) {
+    var es = ENUM_SETTINGS[j]
+    out[es.key] = es.values.some(function (v) { return v.key === src[es.key] })
+      ? src[es.key] : null
+  }
   return out
 }
 
@@ -151,13 +204,17 @@ function scopeEntry(cfg, scope) {
 // -------------------------------------------------------------- hyprctl I/O
 
 // `hyprctl -j getoption <name>` → current value, or null if unset/absent.
+// Hyprland reports an unset string option as the literal "[[EMPTY]]".
 function parseGetOption(raw) {
   try {
     var json = JSON.parse(String(raw || "").trim() || "{}")
     if (json.bool !== undefined) return !!json.bool
     if (json.int !== undefined) return Number(json.int)
     if (json.float !== undefined) return Number(json.float)
-    if (json.str !== undefined) return String(json.str)
+    if (json.str !== undefined) {
+      var s = String(json.str)
+      return (s === "" || s === "[[EMPTY]]") ? null : s
+    }
     return null
   } catch (e) {
     return null
@@ -169,10 +226,44 @@ function scrollStopValue(key) {
   return 0.4
 }
 
-// Minimal Lua-literal for the value types we emit (bool, number).
+// libinput sensitivity is defined only over [-1, 1]; Hyprland does not clamp.
+function pointerStopValue(key) {
+  for (var i = 0; i < POINTER_STOPS.length; i++) {
+    if (POINTER_STOPS[i].key === key) return Math.max(-1, Math.min(1, POINTER_STOPS[i].value))
+  }
+  return 0
+}
+
+// The Lua string for an enum setting's value, taken from the closed table —
+// returns null if either key is unknown (caller skips it).
+function enumValue(settingKey, valueKey) {
+  for (var i = 0; i < ENUM_SETTINGS.length; i++) {
+    if (ENUM_SETTINGS[i].key !== settingKey) continue
+    for (var j = 0; j < ENUM_SETTINGS[i].values.length; j++) {
+      if (ENUM_SETTINGS[i].values[j].key === valueKey) return ENUM_SETTINGS[i].values[j].lua
+    }
+  }
+  return null
+}
+
+function enumSetting(settingKey) {
+  for (var i = 0; i < ENUM_SETTINGS.length; i++) if (ENUM_SETTINGS[i].key === settingKey) return ENUM_SETTINGS[i]
+  return null
+}
+
+function _merge(a, b) {
+  var o = {}
+  for (var k in a) o[k] = a[k]
+  for (var k2 in b) o[k2] = b[k2]
+  return o
+}
+
+// Minimal Lua-literal for the value types we emit: bool, number, and a
+// bare-word string (enum values — [a-z0-9_-] only, defensively stripped).
 function luaValue(v) {
   if (v === true) return "true"
   if (v === false) return "false"
+  if (typeof v === "string") return '"' + v.replace(/[^A-Za-z0-9_-]/g, "") + '"'
   return String(Number(v))
 }
 
@@ -182,21 +273,31 @@ function assignParts(assign) {
   return parts.join(", ")
 }
 
-// ---- global (input.touchpad) -------------------------------------------------
+// ---- global (hl.config) -----------------------------------------------------
 
-function configLua(assign) {
-  return "hl.config({ input = { touchpad = { " + assignParts(assign) + " } } })"
+// `touchpadAssign` keys nest under `input.touchpad`; `inputAssign` keys nest
+// under `input` directly (sensitivity, accel_profile, scroll_method). With no
+// `inputAssign` this is exactly the v0.2 single-level form, so existing
+// callers and their asserted strings are unchanged.
+function configLua(touchpadAssign, inputAssign) {
+  var tpParts = assignParts(touchpadAssign || {})
+  var inpParts = assignParts(inputAssign || {})
+  var segs = []
+  if (inpParts) segs.push(inpParts)
+  if (tpParts || !inpParts) segs.push("touchpad = { " + tpParts + " }")
+  return "hl.config({ input = { " + segs.join(", ") + " } })"
 }
 
-function configEvalArgs(assign) {
-  return ["hyprctl", "eval", configLua(assign)]
+function configEvalArgs(touchpadAssign, inputAssign) {
+  return ["hyprctl", "eval", configLua(touchpadAssign, inputAssign)]
 }
 
-// One global touchpad field change (used on each click in the Global scope).
-function toggleEvalArgs(field, value) {
+// One global field change (used on each click in the Global scope). `level`
+// is "input" for the section-level keys, anything else for `input.touchpad`.
+function toggleEvalArgs(field, value, level) {
   var a = {}
   a[field] = value
-  return configEvalArgs(a)
+  return level === "input" ? configEvalArgs({}, a) : configEvalArgs(a)
 }
 
 // ---- per-device (hl.device) ----------------------------------------------
@@ -232,19 +333,40 @@ function resetDeviceEvalArgs(cfg, live, name) {
     assign[t.field] = effectiveToggle(cfg, live, GLOBAL, t.key)
   }
   assign[SCROLL_FIELD] = scrollStopValue(effectiveScroll(cfg, live, GLOBAL))
+  assign[POINTER_FIELD] = pointerStopValue(effectivePointer(cfg, live, GLOBAL))
+  for (var j = 0; j < ENUM_SETTINGS.length; j++) {
+    var es = ENUM_SETTINGS[j]
+    var lv = enumValue(es.key, effectiveEnum(cfg, live, GLOBAL, es.key))
+    if (lv !== null) assign[es.field] = lv
+  }
   return deviceEvalArgs(name, assign)
 }
 
 // ---- assemble ----------------------------------------------------------------
 
+// An entry's set options, split by where they nest in a global `hl.config`:
+//   { touchpad: { … }, input: { … } }
+// A device scope flattens both halves into one `hl.device` table.
 function entryAssign(entry) {
-  var assign = {}
+  var touchpad = {}, input = {}
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) {
     var t = TOUCHPAD_TOGGLES[i]
-    if (entry.touchpad[t.key] === true || entry.touchpad[t.key] === false) assign[t.field] = entry.touchpad[t.key]
+    var v = entry.touchpad[t.key]
+    if (v === true || v === false) touchpad[t.field] = v
   }
-  if (entry.scrollSpeed) assign[SCROLL_FIELD] = scrollStopValue(entry.scrollSpeed)
-  return assign
+  if (entry.scrollSpeed) touchpad[SCROLL_FIELD] = scrollStopValue(entry.scrollSpeed)
+  if (entry.pointerSpeed) input[POINTER_FIELD] = pointerStopValue(entry.pointerSpeed)
+  for (var j = 0; j < ENUM_SETTINGS.length; j++) {
+    var es = ENUM_SETTINGS[j]
+    var lv = enumValue(es.key, entry[es.key])
+    if (lv === null) continue
+    ;(es.level === "input" ? input : touchpad)[es.field] = lv
+  }
+  return { touchpad: touchpad, input: input }
+}
+
+function assignCount(split) {
+  return Object.keys(split.touchpad).length + Object.keys(split.input).length
 }
 
 // Every command to reconcile Hyprland with `cfg`: one `hl.config` for the
@@ -254,12 +376,12 @@ function applyPlan(cfg) {
   var plan = []
 
   var g = entryAssign(c.global)
-  if (Object.keys(g).length > 0) plan.push(configEvalArgs(g))
+  if (assignCount(g) > 0) plan.push(configEvalArgs(g.touchpad, g.input))
 
   for (var name in c.devices) {
     if (!isDeviceName(name)) continue
     var d = entryAssign(c.devices[name])
-    if (Object.keys(d).length > 0) plan.push(deviceEvalArgs(name, d))
+    if (assignCount(d) > 0) plan.push(deviceEvalArgs(name, _merge(d.input, d.touchpad)))
   }
   return plan
 }
@@ -294,12 +416,12 @@ function generateLua(cfg) {
   ]
 
   var g = entryAssign(c.global)
-  if (Object.keys(g).length > 0) out.push(configLua(g))
+  if (assignCount(g) > 0) out.push(configLua(g.touchpad, g.input))
 
   for (var name in c.devices) {
     if (!isDeviceName(name)) continue
     var d = entryAssign(c.devices[name])
-    if (Object.keys(d).length > 0) out.push("pcall(function() " + deviceLua(name, d) + " end)")
+    if (assignCount(d) > 0) out.push("pcall(function() " + deviceLua(name, _merge(d.input, d.touchpad)) + " end)")
   }
   return out.join("\n") + "\n"
 }
@@ -339,11 +461,58 @@ function effectiveScroll(cfg, live, scope) {
   return (l === "slow" || l === "normal" || l === "fast") ? l : "normal"
 }
 
-// True when a device scope has not set this option itself (it inherits global).
+function nearestStop(stops, val) {
+  var best = stops[0].key, bestD = Infinity
+  for (var i = 0; i < stops.length; i++) {
+    var d = Math.abs(stops[i].value - val)
+    if (d < bestD) { bestD = d; best = stops[i].key }
+  }
+  return best
+}
+
+// Pointer speed for a scope: device value → global value → the live
+// `input:sensitivity` float snapped to the nearest stop → "default".
+function effectivePointer(cfg, live, scope) {
+  var s = scope || GLOBAL
+  var c = normalizeConfig(cfg)
+  if (s !== GLOBAL) {
+    var dv = (c.devices[s] || emptyEntry()).pointerSpeed
+    if (dv) return dv
+  }
+  if (c.global.pointerSpeed) return c.global.pointerSpeed
+  var lv = (live && typeof live === "object") ? Number(live.pointerSpeed) : NaN
+  return isFinite(lv) ? nearestStop(POINTER_STOPS, lv) : "default"
+}
+
+// Enum setting value-key for a scope: device → global → the live Lua string
+// mapped back to a value key → the setting's first value (its libinput
+// default). Returns null only for an unknown settingKey.
+function effectiveEnum(cfg, live, scope, settingKey) {
+  var es = enumSetting(settingKey)
+  if (!es) return null
+  var s = scope || GLOBAL
+  var c = normalizeConfig(cfg)
+  if (s !== GLOBAL) {
+    var dv = (c.devices[s] || emptyEntry())[settingKey]
+    if (dv) return dv
+  }
+  if (c.global[settingKey]) return c.global[settingKey]
+  var raw = (live && typeof live === "object") ? live[settingKey] : null
+  for (var i = 0; i < es.values.length; i++) if (es.values[i].lua === raw) return es.values[i].key
+  return es.values[0].key
+}
+
+// True when a device scope has not set this option itself (it inherits
+// global). `key` is a touchpad-toggle key, "scrollSpeed", "pointerSpeed", or
+// an ENUM_SETTINGS key.
 function isInherited(cfg, scope, key) {
   if (!scope || scope === GLOBAL) return false
-  var v = (normalizeConfig(cfg).devices[scope] || emptyEntry()).touchpad[key]
-  return v !== true && v !== false
+  var e = normalizeConfig(cfg).devices[scope] || emptyEntry()
+  if (key in e.touchpad) {
+    var v = e.touchpad[key]
+    return v !== true && v !== false
+  }
+  return !e[key]
 }
 
 // How many options a device scope overrides (0 → "Reset to global" is hidden).
@@ -351,11 +520,14 @@ function deviceOverrideCount(cfg, scope) {
   if (!scope || scope === GLOBAL) return 0
   var e = normalizeConfig(cfg).devices[scope]
   if (!e) return 0
-  var n = e.scrollSpeed ? 1 : 0
+  var n = 0
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) {
     var v = e.touchpad[TOUCHPAD_TOGGLES[i].key]
     if (v === true || v === false) n++
   }
+  if (e.scrollSpeed) n++
+  if (e.pointerSpeed) n++
+  for (var j = 0; j < ENUM_SETTINGS.length; j++) if (e[ENUM_SETTINGS[j].key]) n++
   return n
 }
 
@@ -431,6 +603,11 @@ if (typeof module !== "undefined") {
     SCROLL_STOPS: SCROLL_STOPS,
     SCROLL_FIELD: SCROLL_FIELD,
     SCROLL_OPTION: SCROLL_OPTION,
+    POINTER_STOPS: POINTER_STOPS,
+    POINTER_FIELD: POINTER_FIELD,
+    POINTER_LEVEL: POINTER_LEVEL,
+    POINTER_OPTION: POINTER_OPTION,
+    ENUM_SETTINGS: ENUM_SETTINGS,
     GLOBAL: GLOBAL,
     GESTURES: GESTURES,
     PLANNED_GESTURES: PLANNED_GESTURES,
@@ -444,6 +621,9 @@ if (typeof module !== "undefined") {
     deviceLabel: deviceLabel,
     parseGetOption: parseGetOption,
     scrollStopValue: scrollStopValue,
+    pointerStopValue: pointerStopValue,
+    enumValue: enumValue,
+    enumSetting: enumSetting,
     luaValue: luaValue,
     configLua: configLua,
     configEvalArgs: configEvalArgs,
@@ -458,6 +638,8 @@ if (typeof module !== "undefined") {
     generateLua: generateLua,
     effectiveToggle: effectiveToggle,
     effectiveScroll: effectiveScroll,
+    effectivePointer: effectivePointer,
+    effectiveEnum: effectiveEnum,
     isInherited: isInherited,
     deviceOverrideCount: deviceOverrideCount,
     summaryLine: summaryLine,

@@ -61,6 +61,13 @@ const SHAPES = {
       "apple-inc.-magic-trackpad": { touchpad: { naturalScroll: true }, scrollSpeed: null },
       "synps2-synaptics-touchpad": { touchpad: { tapToClick: false }, scrollSpeed: "fast" }
     }
+  },
+  "v2: pointer speed + enum settings, global and device": {
+    version: 2,
+    global: { touchpad: { tapToClick: true }, scrollSpeed: "slow", pointerSpeed: "fast", accelProfile: "flat", scrollMethod: "edge" },
+    devices: {
+      "apple-inc.-magic-trackpad": { touchpad: {}, pointerSpeed: "slowest", scrollMethod: "2fg", accelProfile: "adaptive" }
+    }
   }
 }
 

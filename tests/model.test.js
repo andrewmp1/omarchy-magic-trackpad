@@ -110,6 +110,33 @@ test("parseGetOption reads bool/int/float/str and unset", () => {
   assert.equal(M.parseGetOption('{"str": "x"}'), "x")
   assert.equal(M.parseGetOption("no such option"), null)
   assert.equal(M.parseGetOption(""), null)
+  // Hyprland reports an unset string option as the literal "[[EMPTY]]"
+  assert.equal(M.parseGetOption('{"str": "[[EMPTY]]"}'), null)
+  assert.equal(M.parseGetOption('{"str": ""}'), null)
+})
+
+test("pointerStopValue clamps to libinput's [-1, 1]", () => {
+  assert.equal(M.pointerStopValue("default"), 0)
+  assert.equal(M.pointerStopValue("slowest"), -0.6)
+  assert.equal(M.pointerStopValue("fastest"), 0.7)
+  assert.equal(M.pointerStopValue("nonsense"), 0)
+  for (const s of M.POINTER_STOPS) assert.ok(s.value >= -1 && s.value <= 1)
+})
+
+test("enumValue resolves a value key to its Lua string, else null", () => {
+  assert.equal(M.enumValue("accelProfile", "flat"), "flat")
+  assert.equal(M.enumValue("scrollMethod", "2fg"), "2fg")
+  assert.equal(M.enumValue("scrollMethod", "edge"), "edge")
+  assert.equal(M.enumValue("accelProfile", "bogus"), null)
+  assert.equal(M.enumValue("noSuchSetting", "flat"), null)
+})
+
+test("luaValue emits bare-word strings, stripped to [A-Za-z0-9_-]", () => {
+  assert.equal(M.luaValue("flat"), '"flat"')
+  assert.equal(M.luaValue("2fg"), '"2fg"')
+  assert.equal(M.luaValue('x"); os.execute("y'), '"xosexecutey"')
+  assert.equal(M.luaValue(true), "true")
+  assert.equal(M.luaValue(0), "0")
 })
 
 test("configLua / configEvalArgs / toggleEvalArgs build the global hl.config", () => {
@@ -124,6 +151,24 @@ test("configLua / configEvalArgs / toggleEvalArgs build the global hl.config", (
   assert.deepEqual(
     M.toggleEvalArgs("tap_to_click", true),
     ["hyprctl", "eval", "hl.config({ input = { touchpad = { tap_to_click = true } } })"]
+  )
+})
+
+test("configLua nests section-level keys under `input`, beside `touchpad`", () => {
+  // input-level only
+  assert.equal(
+    M.configLua({}, { sensitivity: 0.35 }),
+    "hl.config({ input = { sensitivity = 0.35 } })"
+  )
+  // both levels — input keys first, then the touchpad sub-table
+  assert.equal(
+    M.configLua({ tap_to_click: true }, { accel_profile: "flat" }),
+    'hl.config({ input = { accel_profile = "flat", touchpad = { tap_to_click = true } } })'
+  )
+  // toggleEvalArgs with level "input"
+  assert.deepEqual(
+    M.toggleEvalArgs("sensitivity", 0, "input"),
+    ["hyprctl", "eval", "hl.config({ input = { sensitivity = 0 } })"]
   )
 })
 
@@ -212,6 +257,33 @@ test("applyPlan: nothing set -> empty plan; stale gestures produce nothing", () 
   assert.equal(M.GESTURES.length, 0)
 })
 
+test("applyPlan: pointer speed + accel profile — global one eval (two levels), device flat", () => {
+  const plan = M.applyPlan({
+    version: 2,
+    global: { touchpad: { tapToClick: true }, scrollSpeed: "slow", pointerSpeed: "fast", accelProfile: "flat" },
+    devices: { "logitech-m720": { touchpad: {}, scrollSpeed: null, pointerSpeed: "slowest", scrollMethod: "edge" } }
+  })
+  assert.equal(plan.length, 2)
+  // global: one hl.config with input-level keys AND the touchpad sub-table
+  assert.ok(plan[0][2].startsWith("hl.config({ input = { "))
+  assert.ok(plan[0][2].includes("sensitivity = 0.35"))
+  assert.ok(plan[0][2].includes('accel_profile = "flat"'))
+  assert.ok(plan[0][2].includes("touchpad = { tap_to_click = true, scroll_factor = 0.2 }"))
+  // device: hl.device is flat — no nested touchpad table
+  assert.ok(plan[1][2].startsWith('hl.device({ name = "logitech-m720", '))
+  assert.ok(!plan[1][2].includes("touchpad = {"))
+  assert.ok(plan[1][2].includes("sensitivity = -0.6"))
+  assert.ok(plan[1][2].includes('scroll_method = "edge"'))
+})
+
+test("applyPlan: pointer speed alone, global scope -> hl.config with no touchpad table", () => {
+  const plan = M.applyPlan({
+    version: 2, global: { touchpad: {}, scrollSpeed: null, pointerSpeed: "default" }, devices: {}
+  })
+  assert.equal(plan.length, 1)
+  assert.equal(plan[0][2], "hl.config({ input = { sensitivity = 0 } })")
+})
+
 // -------------------------------------------------------------- managed lua
 
 test("loader line is idempotent and marker-guarded", () => {
@@ -239,6 +311,16 @@ test("generateLua emits global hl.config then a pcall-wrapped hl.device per over
   assert.ok(lua.includes("hl.config({ input = { touchpad = { tap_to_click = true, scroll_factor = 0.2 } } })"))
   assert.ok(lua.includes('pcall(function() hl.device({ name = "apple-inc.-magic-trackpad", natural_scroll = false }) end)'))
   assert.ok(!lua.includes("middle_button_emulation"))
+})
+
+test("generateLua carries pointer speed + enum settings", () => {
+  const lua = M.generateLua({
+    version: 2,
+    global: { touchpad: {}, scrollSpeed: null, pointerSpeed: "fast", scrollMethod: "edge" },
+    devices: { "logitech-m720": { touchpad: {}, pointerSpeed: "slow", accelProfile: "flat" } }
+  })
+  assert.ok(lua.includes('hl.config({ input = { sensitivity = 0.35, scroll_method = "edge" } })'))
+  assert.ok(lua.includes('pcall(function() hl.device({ name = "logitech-m720", sensitivity = -0.3, accel_profile = "flat" }) end)'))
 })
 
 // -------------------------------------------------------------- view model
@@ -281,14 +363,65 @@ test("isInherited / deviceOverrideCount describe a device scope", () => {
   const cfg = {
     version: 2,
     global: { touchpad: { tapToClick: true }, scrollSpeed: null },
-    devices: { "logitech-m720": { touchpad: { naturalScroll: false }, scrollSpeed: "slow" } }
+    devices: { "logitech-m720": { touchpad: { naturalScroll: false }, scrollSpeed: "slow", pointerSpeed: "fast", accelProfile: "flat" } }
   }
   assert.equal(M.isInherited(cfg, "logitech-m720", "naturalScroll"), false)
   assert.equal(M.isInherited(cfg, "logitech-m720", "tapToClick"), true)
+  assert.equal(M.isInherited(cfg, "logitech-m720", "pointerSpeed"), false)
+  assert.equal(M.isInherited(cfg, "logitech-m720", "scrollMethod"), true)
   assert.equal(M.isInherited(cfg, "global", "tapToClick"), false)
-  assert.equal(M.deviceOverrideCount(cfg, "logitech-m720"), 2) // naturalScroll + scrollSpeed
+  // naturalScroll + scrollSpeed + pointerSpeed + accelProfile
+  assert.equal(M.deviceOverrideCount(cfg, "logitech-m720"), 4)
   assert.equal(M.deviceOverrideCount(cfg, "global"), 0)
   assert.equal(M.deviceOverrideCount(cfg, "never-seen"), 0)
+})
+
+test("effectivePointer cascades device -> global -> nearest live stop -> default", () => {
+  const cfg = {
+    version: 2,
+    global: { touchpad: {}, scrollSpeed: null, pointerSpeed: "fast" },
+    devices: { "logitech-m720": { touchpad: {}, pointerSpeed: "slowest" } }
+  }
+  assert.equal(M.effectivePointer(cfg, {}, "logitech-m720"), "slowest")
+  assert.equal(M.effectivePointer(cfg, {}, "global"), "fast")
+  assert.equal(M.effectivePointer(cfg, {}, "apple-inc.-magic-trackpad"), "fast") // inherits global
+  // no config anywhere: snap the live sensitivity float to the closest stop
+  const bare = { version: 2, global: { touchpad: {}, pointerSpeed: null }, devices: {} }
+  assert.equal(M.effectivePointer(bare, { pointerSpeed: 0.34 }, "global"), "fast")   // 0.35 stop
+  assert.equal(M.effectivePointer(bare, { pointerSpeed: -0.9 }, "global"), "slowest") // -0.6 stop
+  assert.equal(M.effectivePointer(bare, {}, "global"), "default")
+})
+
+test("effectiveEnum cascades device -> global -> live string -> libinput default", () => {
+  const cfg = {
+    version: 2,
+    global: { touchpad: {}, accelProfile: "flat" },
+    devices: { "logitech-m720": { touchpad: {}, scrollMethod: "edge" } }
+  }
+  assert.equal(M.effectiveEnum(cfg, {}, "logitech-m720", "scrollMethod"), "edge")
+  assert.equal(M.effectiveEnum(cfg, {}, "logitech-m720", "accelProfile"), "flat") // inherits global
+  assert.equal(M.effectiveEnum(cfg, {}, "global", "accelProfile"), "flat")
+  // unset everywhere: live Lua string maps back, else the setting's first value
+  const bare = { version: 2, global: { touchpad: {} }, devices: {} }
+  assert.equal(M.effectiveEnum(bare, { accelProfile: "flat" }, "global", "accelProfile"), "flat")
+  assert.equal(M.effectiveEnum(bare, {}, "global", "accelProfile"), "adaptive")
+  assert.equal(M.effectiveEnum(bare, {}, "global", "scrollMethod"), "2fg")
+  assert.equal(M.effectiveEnum(bare, {}, "global", "bogus"), null)
+})
+
+test("normalizeConfig keeps valid pointerSpeed / enum keys, nulls junk", () => {
+  const c = M.normalizeConfig({
+    version: 2,
+    global: { touchpad: {}, pointerSpeed: "fast", accelProfile: "flat", scrollMethod: "warp" },
+    devices: {}
+  })
+  assert.equal(c.global.pointerSpeed, "fast")
+  assert.equal(c.global.accelProfile, "flat")
+  assert.equal(c.global.scrollMethod, null) // "warp" is not a scrollMethod value
+  // a fresh v1 doc has neither -> null after migration
+  const v1 = M.normalizeConfig({ version: 1, touchpad: { tapToClick: true }, scrollSpeed: "fast" })
+  assert.equal(v1.global.pointerSpeed, null)
+  assert.equal(v1.global.accelProfile, null)
 })
 
 test("summaryLine is scope-aware", () => {
