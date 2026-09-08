@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "andrewmp1.magic-trackpad",
   "name": "Magic Trackpad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "Drew Purdy",
   "license": "MIT",
   "description": "Tune the libinput touchpad from the Omarchy bar — tap-to-click, two-finger right-click, natural scroll, scroll speed, disable-while-typing. Applied live, persisted, fully reversible.",

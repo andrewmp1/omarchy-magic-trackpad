@@ -1,6 +1,6 @@
 {
   "name": "omarchy-magic-trackpad",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "Omarchy bar widget for trackpad behaviour and finger-swipe gestures",
   "license": "MIT",
