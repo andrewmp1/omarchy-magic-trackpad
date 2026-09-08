@@ -121,6 +121,13 @@ Issues and PRs welcome.
   `bash scripts/check.sh`, and keep `Model.js` pure so `node --test` still
   covers the logic.
 
+## Publishing
+
+Not on the marketplace yet. When it goes up:
+`omarchy plugin validate .`, then the submission form at
+[omacom/omarchy-plugin-marketplace](https://github.com/omacom/omarchy-plugin-marketplace/issues/new?template=submit-plugin.yml).
+Full checklist: [docs/PUBLISHING.md](docs/PUBLISHING.md).
+
 ## Roadmap
 
 - **v0.2 — finger swipes.** 3/4-finger → switch workspace. Held back because a

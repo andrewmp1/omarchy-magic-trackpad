@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "Drew Purdy",
   "license": "MIT",
-  "description": "Touchpad behaviour in the Omarchy bar. v0.1 reads and sets the libinput touchpad options Hyprland already supports (tap-to-click, two-finger right-click, natural scroll, scroll speed, disable-while-typing, tap-and-drag, middle-click emulation), applied live and persisted, fully reversible. Later versions add finger-swipe gestures, Apple Magic Trackpad Taptic Engine strength, and a custom-gesture daemon.",
+  "description": "Tune the libinput touchpad from the Omarchy bar — tap-to-click, two-finger right-click, natural scroll, scroll speed, disable-while-typing. Applied live, persisted, fully reversible.",
   "kinds": [
     "bar-widget"
   ],

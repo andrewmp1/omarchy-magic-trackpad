@@ -8,12 +8,25 @@ const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "u
 
 test("manifest.json is well-formed for the Omarchy plugin schema", () => {
   assert.equal(manifest.schemaVersion, 1)
-  assert.match(manifest.id, /^[a-z0-9][a-z0-9-]*\.[a-z0-9][a-z0-9-]*$/, "id must look like <handle>.<name>")
+  assert.match(manifest.id, /^[a-z0-9][a-z0-9.-]*\.[a-z0-9][a-z0-9-]*$/, "id must be namespaced (dot-separated)")
   assert.ok(typeof manifest.name === "string" && manifest.name.length > 0)
   assert.ok(typeof manifest.version === "string" && /^\d+\.\d+\.\d+$/.test(manifest.version))
   assert.ok(Array.isArray(manifest.kinds) && manifest.kinds.includes("bar-widget"))
   assert.ok(manifest.entryPoints && typeof manifest.entryPoints.barWidget === "string")
   assert.ok(manifest.barWidget && typeof manifest.barWidget.displayName === "string")
+  for (const f of ["author", "license", "description"]) {
+    assert.ok(typeof manifest[f] === "string" && manifest[f].length > 0, `missing field: ${f}`)
+  }
+})
+
+test("manifest.json obeys the marketplace publishing rules", () => {
+  // https://plugins.omarchy.org/publish.html
+  assert.ok(!manifest.id.startsWith("omarchy."), "'omarchy.*' ids are reserved for official plugins")
+  assert.ok(!("clonedFrom" in manifest) && !("omarchy.clonedFrom" in manifest),
+    "remove the clonedFrom field before publishing")
+  assert.ok(manifest.version.length <= 64, "version must be <= 64 chars for the marketplace card")
+  assert.ok(manifest.description.length <= 240,
+    "keep description a one-liner for the marketplace card (detail goes in the README)")
 })
 
 test("every declared entry-point file exists", () => {
