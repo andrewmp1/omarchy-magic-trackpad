@@ -9,6 +9,7 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const { execFileSync } = require("node:child_process")
+const fs = require("node:fs")
 const M = require("../Model.js")
 
 const inSession = !!process.env.HYPRLAND_INSTANCE_SIGNATURE
@@ -63,6 +64,45 @@ test("live: scroll_factor takes a float via the plugin's command", opts, () => {
     assert.ok(Math.abs(Number(getOpt(M.SCROLL_OPTION)) - 0.8) < 1e-6, "scroll_factor did not become 0.8")
   } finally {
     evalLua(M.toggleEvalArgs(M.SCROLL_FIELD, restore)[2])
+  }
+})
+
+// Per-device: hl.device({ name = ... }) has no getoption readback, so the
+// contract here is narrower — the command Hyprland accepts is "ok" and does
+// not error. Runs only when a real touchpad is detected.
+function detectedTouchpad() {
+  const dev = hyprctl(["devices", "-j"]).out
+  let proc = ""
+  try { proc = fs.readFileSync("/proc/bus/input/devices", "utf8") } catch (e) { /* fall back */ }
+  const list = M.touchpadDevices(dev, proc)
+  return list.length ? list[0].name : null
+}
+
+test("live: hl.device applies for a detected touchpad and reports ok", opts, () => {
+  const name = detectedTouchpad()
+  if (!name) return // no touchpad on this box — nothing to contract-check
+
+  const globalBefore = getOpt("input:touchpad:natural_scroll") === true
+  try {
+    const args = M.deviceEvalArgs(name, { natural_scroll: !globalBefore })
+    assert.ok(args, `deviceEvalArgs refused the detected name: ${name}`)
+    const r = evalLua(args[2])
+    assert.equal(r.out, "ok", `hyprctl eval failed for hl.device: ${r.err || r.out}`)
+
+    const reset = M.resetDeviceEvalArgs(
+      { version: 2, global: { touchpad: {}, scrollSpeed: null }, devices: {} },
+      { naturalScroll: globalBefore },
+      name
+    )
+    assert.equal(evalLua(reset[2]).out, "ok", "resetDeviceEvalArgs did not apply cleanly")
+  } finally {
+    // Pin the device back to whatever global currently is.
+    const back = M.resetDeviceEvalArgs(
+      { version: 2, global: { touchpad: {}, scrollSpeed: null }, devices: {} },
+      { naturalScroll: globalBefore },
+      name
+    )
+    if (back) evalLua(back[2])
   }
 })
 

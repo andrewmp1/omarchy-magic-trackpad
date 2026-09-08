@@ -16,10 +16,19 @@ ones.
 ## What each layer catches
 
 **1–3 (portable, run anywhere incl. CI):**
-- config normalization / repair of hand-edited JSON
-- the exact `hl.config` / `hl.gesture` strings and the batched apply plan
+- config normalization / repair of hand-edited JSON, and the **v1 → v2
+  config-document migration** (a `{version:1, touchpad, scrollSpeed}` doc lands
+  under `global` with nothing lost)
+- touchpad detection from `hyprctl devices` + `/proc/bus/input/devices`
+  fixtures (a mouse+touchpad mix, and the no-signal fallback), and
+  device-name rejection (anchored allow-list, refuse-not-repair)
+- the scope cascade: `effectiveToggle` / `effectiveScroll` resolve
+  device → global → live in that order
+- the exact `hl.config` / `hl.device` strings and the batched apply plan
+  (Global only → 1 eval; Global + a device → `hl.config` then `hl.device`)
 - the generated `~/.config/hypr/omarchy-magic-trackpad.lua` **parses as Lua**
-  (a syntax error there would break the user's whole Hyprland config)
+  for every shape incl. per-device blocks (a syntax error there would break
+  the user's whole Hyprland config)
 - the one-line loader edit to `hyprland.lua` is idempotent and still valid Lua
 - `BarWidget.qml` `moduleName` == manifest `id`; README/AGENTS mention it
   (guards the "rename the handle everywhere" footgun)
@@ -29,7 +38,10 @@ For every touchpad option + scroll, it reads the current value, applies it
 with the plugin's *own* command (`hyprctl eval "hl.config{…}"`), asserts
 `hyprctl getoption` changed, and restores. This is the layer that caught
 `hyprctl keyword` being rejected by Omarchy's Lua parser. If a future
-Hyprland renames an option or changes `eval`, these go red.
+Hyprland renames an option or changes `eval`, these go red. It also fires
+`hl.device({ name = <a detected touchpad> })` and asserts `ok` (per-device
+has no `getoption` read-back to verify against), restoring the device to
+Global's values afterward — skipped when no touchpad is present.
 
 **5 — shell smoke (no GUI tools):**
 Reloads the plugin into the running `omarchy-shell`, opens the panel over
@@ -41,17 +53,22 @@ render nothing and only show up in the log.
 **6 — panel e2e (synthetic keystrokes → real effects):**
 Opens the panel, drives the keyboard-cursor with `wtype` (Wayland
 virtual-keyboard protocol — no daemon, no root), and asserts the real
-outcome:
-- `activate` on row 0 flips `input:touchpad:tap_to_click` **and** writes
-  `~/.config/omarchy/magic-trackpad.json`
-- `nav 2; activate` flips `natural_scroll` (keyboard navigation works)
-- `nav 6; activate` cycles the scroll-speed segmented control
+outcome. `$BASE` is `1` when the panel shows a SCOPE row (a touchpad is
+detected) and `0` otherwise; every nav count below is offset by it:
+- `nav $BASE; activate` flips `input:touchpad:tap_to_click` **and** writes
+  `.global.touchpad.tapToClick` in `~/.config/omarchy/magic-trackpad.json`
+- `nav $((BASE+2)); activate` flips `natural_scroll` (keyboard nav works)
+- `nav $((BASE+6)); activate` cycles the scroll-speed segmented control
 - after `hyprctl reload`, the value **persists** (the managed `.lua`
   re-applied it)
+- **per-device (when `$BASE` is 1):** `activate` the SCOPE row → the panel
+  switches to the detected touchpad; `nav $((BASE+2)); activate` writes
+  `.devices["<slug>"].touchpad.naturalScroll` and adds an `hl.device(` block
+  to the managed `.lua`
 
-It restores every value it touched on exit. Off-desktop or without `wtype`
-it skips (exit 0); set `E2E_STRICT=1` to make "panel didn't receive keys" a
-failure.
+It restores every value it touched on exit (including re-pinning any device
+it scoped). Off-desktop or without `wtype` it skips (exit 0); set
+`E2E_STRICT=1` to make "panel didn't receive keys" a failure.
 
 ## Manual checklist (do this before tagging a release)
 
@@ -62,14 +79,26 @@ failure.
    `hyprctl getoption -j input:touchpad:natural_scroll` shows the new value;
    `~/.config/omarchy/magic-trackpad.json` gains `"naturalScroll"`.
 4. Change **Scroll speed** to Fast → scrolling is noticeably quicker.
-5. `hyprctl reload` → settings stick.
-6. `omarchy plugin disable andrewmp1.magic-trackpad` → glyph gone;
+5. **Per-device** (needs an external touchpad, e.g. a Magic Trackpad):
+   - The **Scope** picker shows **Global** + the pad. Pick the pad.
+   - Toggle rows read "Inherited from Global" until changed. Flip
+     **Natural scroll** off → only *that* pad reverses; the built-in pad is
+     unchanged. `~/.config/omarchy/magic-trackpad.json` gains
+     `devices["<slug>"]`; the managed `.lua` gains
+     `hl.device({ name = "<slug>", natural_scroll = … })`.
+   - **Reset <pad> to Global** → confirm → the pad's overrides clear and it
+     tracks Global again.
+   - `hyprctl reload` and `omarchy restart shell` → the override persists.
+   - Unplug the pad → the Scope picker drops it and the panel falls back to
+     Global.
+6. `hyprctl reload` → settings stick.
+7. `omarchy plugin disable andrewmp1.magic-trackpad` → glyph gone;
    `omarchy plugin enable …` → it comes back with your settings intact.
-7. `omarchy restart shell` → panel still shows your values; bar glyph is lit.
-8. Log out and back in → settings still applied (the loader line in
+8. `omarchy restart shell` → panel still shows your values; bar glyph is lit.
+9. Log out and back in → settings still applied (the loader line in
    `hyprland.lua` did its job).
-9. Keyboard: open panel, `j`/`k` move, `Enter` toggles, `Esc` closes.
-10. `omarchy plugin remove andrewmp1.magic-trackpad` then delete the two
+10. Keyboard: open panel, `j`/`k` move, `Enter` toggles, `Esc` closes.
+11. `omarchy plugin remove andrewmp1.magic-trackpad` then delete the two
     generated files + the loader line → Hyprland is exactly as before.
 
 ## Mouse automation (optional)

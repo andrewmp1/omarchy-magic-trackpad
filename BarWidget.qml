@@ -6,8 +6,12 @@ import "Model.js" as Model
 
 // Bar button + popup for libinput touchpad behaviour.
 // Level 1: everything here is a plain libinput / Hyprland setting, applied
-// live with `hyprctl eval "hl.config{...}"` and persisted to a managed Lua file.
-// No daemon, no elevated permissions.
+// live with `hyprctl eval "hl.config{...}"` / `"hl.device{...}"` and persisted
+// to a managed Lua file. No daemon, no elevated permissions.
+//
+// v0.2 adds a scope: "Global" writes Hyprland's `input.touchpad` section;
+// picking a detected touchpad writes an `hl.device` block for that pad only.
+// A device scope that hasn't overridden an option inherits Global.
 Panel {
   id: root
   moduleName: "andrewmp1.magic-trackpad"
@@ -23,61 +27,190 @@ Panel {
   property bool appliedOnce: false
   property string notice: ""
 
+  // "global" or a detected touchpad's device slug.
+  property string scope: Model.GLOBAL
+  // Reset-to-global confirmation is showing.
+  property bool resetPending: false
+
+  // Global + one entry per detected touchpad. Labels are pre-stripped and
+  // length-capped in Model.deviceLabel — they land in host-owned sinks
+  // (ButtonGroup / Dropdown) that cannot be pinned to PlainText.
+  readonly property var scopeOptions: {
+    var opts = [{ value: Model.GLOBAL, label: "Global" }]
+    var devs = sync.touchpadDevices || []
+    for (var i = 0; i < devs.length && opts.length < 13; i++)
+      opts.push({ value: devs[i].name, label: devs[i].label })
+    return opts
+  }
+  readonly property bool scopeUsesDropdown: scopeOptions.length > 3
+  readonly property bool scopeIsDevice: scope !== Model.GLOBAL
+  readonly property string scopeLabel: {
+    for (var i = 0; i < scopeOptions.length; i++)
+      if (scopeOptions[i].value === scope) return scopeOptions[i].label
+    return "Global"
+  }
+  readonly property bool scopeDropdownOpen:
+    scopePicker.item && ("popupOpen" in scopePicker.item) && scopePicker.item.popupOpen
+
   // Flat list of things the panel cursor can land on.
-  //   { kind: "toggle", key, field, label }   { kind: "scroll" }
+  //   { kind: "scope" }  { kind: "toggle", key, field, label }
+  //   { kind: "scroll" }  { kind: "reset" }
   readonly property var navItems: {
     var items = []
+    if (scopeOptions.length > 1) items.push({ kind: "scope" })
     for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++) {
       var t = Model.TOUCHPAD_TOGGLES[i]
       items.push({ kind: "toggle", key: t.key, field: t.field, label: t.label })
     }
     items.push({ kind: "scroll" })
+    if (scopeIsDevice && Model.deviceOverrideCount(cfg, scope) > 0) items.push({ kind: "reset" })
     return items
   }
 
+  function setCursorToKind(kind, key) {
+    for (var i = 0; i < navItems.length; i++) {
+      if (navItems[i].kind !== kind) continue
+      if (kind === "toggle" && key !== undefined && navItems[i].key !== key) continue
+      cursorIndex = i
+      return
+    }
+  }
+
   function moveCursor(delta) {
+    if (resetPending) {
+      resetConfirm.selectedIndex = resetConfirm.selectedIndex === 0 ? 1 : 0
+      return
+    }
     if (!cursorActive) { cursorActive = true; return }
     var n = navItems.length
     cursorIndex = ((cursorIndex + delta) % n + n) % n
   }
 
   function activateCursor() {
+    if (resetPending) {
+      if (resetConfirm.selectedIndex === 1) doResetToGlobal()
+      else resetPending = false
+      return
+    }
     if (!cursorActive) { cursorActive = true; return }
     var item = navItems[cursorIndex]
     if (!item) return
-    if (item.kind === "toggle") setToggle(item.key, item.field, !Model.effectiveToggle(cfg, sync.liveValues, item.key))
-    else if (item.kind === "scroll") cycleScroll()
+    if (item.kind === "scope") {
+      if (scopeUsesDropdown && scopePicker.item) scopePicker.item.toggle()
+      else cycleScope()
+    } else if (item.kind === "toggle") {
+      setToggle(item.key, item.field, !Model.effectiveToggle(cfg, sync.liveValues, scope, item.key))
+    } else if (item.kind === "scroll") {
+      cycleScroll()
+    } else if (item.kind === "reset") {
+      resetConfirm.selectedIndex = 1
+      resetPending = true
+    }
+  }
+
+  // ------------------------------------------------------------- scope
+
+  function cycleScope() {
+    var opts = scopeOptions
+    var i = 0
+    for (; i < opts.length; i++) if (opts[i].value === scope) break
+    setScope(opts[(i + 1) % opts.length].value)
+  }
+
+  function setScope(v) {
+    if (v !== Model.GLOBAL) {
+      var ok = false
+      for (var i = 0; i < scopeOptions.length; i++) if (scopeOptions[i].value === v) ok = true
+      if (!ok) return
+    }
+    scope = v
+    cursorActive = true
+    cursorIndex = 0
+  }
+
+  // index of the current scope, for the ButtonGroup cursor highlight
+  function scopeIndex() {
+    for (var i = 0; i < scopeOptions.length; i++) if (scopeOptions[i].value === scope) return i
+    return 0
+  }
+
+  // A detached touchpad drops back to Global so the panel never points at a
+  // device that is no longer there.
+  Connections {
+    target: sync
+    function onTouchpadDevicesChanged() {
+      if (root.scope === Model.GLOBAL) return
+      var devs = sync.touchpadDevices || []
+      for (var i = 0; i < devs.length; i++) if (devs[i].name === root.scope) return
+      root.scope = Model.GLOBAL
+      root.cursorIndex = 0
+    }
   }
 
   // ------------------------------------------------------------- mutations
 
+  // The entry (global section or a device sub-object) the current scope writes.
+  function _entryFor(d, sc) {
+    if (sc === Model.GLOBAL) {
+      if (!d.global) d.global = { touchpad: {}, scrollSpeed: null }
+      return d.global
+    }
+    if (!d.devices) d.devices = {}
+    if (!d.devices[sc]) d.devices[sc] = { touchpad: {}, scrollSpeed: null }
+    return d.devices[sc]
+  }
+
   function setToggle(key, field, value) {
-    store.mutate(function (d) { d.touchpad[key] = value })
-    sync.runOne(Model.toggleEvalArgs(field, value))
+    var sc = scope
+    store.mutate(function (d) { root._entryFor(d, sc).touchpad[key] = value })
+    if (sc === Model.GLOBAL) {
+      sync.runOne(Model.toggleEvalArgs(field, value))
+    } else {
+      var a = Model.deviceToggleEvalArgs(sc, field, value)
+      if (a) sync.runOne(a)
+    }
     sync.writeManaged(store.config)
     flash(value ? "On" : "Off")
   }
 
   function setScroll(key) {
-    store.mutate(function (d) { d.scrollSpeed = key })
-    sync.runOne(Model.toggleEvalArgs(Model.SCROLL_FIELD, Model.scrollStopValue(key)))
+    var sc = scope
+    store.mutate(function (d) { root._entryFor(d, sc).scrollSpeed = key })
+    var val = Model.scrollStopValue(key)
+    if (sc === Model.GLOBAL) {
+      sync.runOne(Model.toggleEvalArgs(Model.SCROLL_FIELD, val))
+    } else {
+      var a = Model.deviceToggleEvalArgs(sc, Model.SCROLL_FIELD, val)
+      if (a) sync.runOne(a)
+    }
     sync.writeManaged(store.config)
     flash("Scroll: " + key)
   }
 
   function cycleScroll() {
     var order = Model.SCROLL_STOPS.map(function (s) { return s.key })
-    var idx = Math.max(0, order.indexOf(Model.effectiveScroll(cfg, sync.liveValues)))
+    var idx = Math.max(0, order.indexOf(Model.effectiveScroll(cfg, sync.liveValues, scope)))
     setScroll(order[(idx + 1) % order.length])
   }
 
   // index of the current scroll stop, for the ButtonGroup cursor highlight
   function scrollIndex() {
-    var cur = Model.effectiveScroll(cfg, sync.liveValues)
+    var cur = Model.effectiveScroll(cfg, sync.liveValues, scope)
     for (var i = 0; i < Model.SCROLL_STOPS.length; i++) if (Model.SCROLL_STOPS[i].key === cur) return i
     return 1
   }
 
+  function doResetToGlobal() {
+    var sc = scope
+    resetPending = false
+    if (sc === Model.GLOBAL) return
+    var args = Model.resetDeviceEvalArgs(store.config, sync.liveValues, sc)
+    store.mutate(function (d) { if (d.devices) delete d.devices[sc] })
+    if (args) sync.runOne(args)
+    sync.writeManaged(store.config)
+    cursorIndex = 0
+    flash("Reset to global")
+  }
 
   function flash(text) {
     notice = text
@@ -153,15 +286,22 @@ Panel {
     bar: root.bar
     open: root.opened
     focusTarget: keyCatcher
-    contentWidth: panel.fittedContentWidth(Style.space(358))
+    contentWidth: panel.fittedContentWidth(Style.space(372))
     contentHeight: panel.fittedContentHeight(column.implicitHeight)
 
     PanelKeyCatcher {
       id: keyCatcher
       anchors.fill: parent
+      // While the scope dropdown's popup owns keys, freeze the panel cursor
+      // and let the dropdown drive itself. The reset dialog is driven through
+      // the semantic signals below, so it does not need to block.
+      blocked: root.scopeDropdownOpen
       onMoveRequested: function (dx, dy) { root.moveCursor(dx !== 0 ? dx : dy) }
       onActivateRequested: root.activateCursor()
-      onCloseRequested: root.close()
+      onCloseRequested: {
+        if (root.resetPending) { root.resetPending = false; return }
+        root.close()
+      }
       onTabRequested: function (direction) { root.switchPanel(direction) }
 
       Column {
@@ -209,7 +349,11 @@ Panel {
               font.bold: true
             }
             Text {
-              text: root.notice !== "" ? root.notice : Model.summaryLine(root.cfg).toUpperCase()
+              text: {
+                if (root.notice !== "") return root.notice
+                var s = Model.summaryLine(root.cfg, root.scope).toUpperCase()
+                return root.scopeIsDevice ? (root.scopeLabel.toUpperCase() + " · " + s) : s
+              }
               textFormat: Text.PlainText
               color: Qt.darker(root.fg, 1.45)
               font.family: root.fontFamily
@@ -223,6 +367,64 @@ Panel {
         }
 
         PanelSeparator { foreground: root.fg }
+
+        // ---- scope picker (only when a touchpad was detected) ----
+        PanelSectionHeader {
+          visible: root.scopeOptions.length > 1
+          text: "SCOPE"
+          foreground: root.fg
+          fontFamily: root.fontFamily
+        }
+
+        Loader {
+          id: scopePicker
+          width: parent.width
+          visible: root.scopeOptions.length > 1
+          active: visible
+          sourceComponent: root.scopeUsesDropdown ? scopeDropdownComp : scopeButtonsComp
+        }
+
+        Component {
+          id: scopeButtonsComp
+          ButtonGroup {
+            width: scopePicker.width
+            options: root.scopeOptions
+            value: root.scope
+            foreground: root.fg
+            background: root.bar ? root.bar.background : Color.background
+            accent: root.accent
+            fontFamily: root.fontFamily
+            fontSize: Style.font.bodySmall
+            focusable: false
+            cursorIndex: (root.cursorActive && root.navItems[root.cursorIndex]
+              && root.navItems[root.cursorIndex].kind === "scope") ? root.scopeIndex() : -1
+            onChanged: function (v) { root.setScope(v) }
+            onHovered: function (index, isHovered) {
+              if (isHovered) { root.cursorActive = true; root.setCursorToKind("scope") }
+            }
+          }
+        }
+
+        Component {
+          id: scopeDropdownComp
+          Dropdown {
+            width: scopePicker.width
+            showLabel: false
+            options: root.scopeOptions
+            value: root.scope
+            foreground: root.fg
+            accent: root.accent
+            fontFamily: root.fontFamily
+            hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
+              && root.navItems[root.cursorIndex].kind === "scope"
+            onChanged: function (v) { root.setScope(v) }
+            onHovered: function (h) {
+              if (h) { root.cursorActive = true; root.setCursorToKind("scope") }
+            }
+          }
+        }
+
+        PanelSeparator { visible: root.scopeOptions.length > 1; foreground: root.fg }
 
         // ---- touchpad toggles ----
         PanelSectionHeader { text: "TOUCHPAD"; foreground: root.fg; fontFamily: root.fontFamily }
@@ -241,20 +443,22 @@ Panel {
                 id: tog
                 width: parent.width
                 label: rowWrap.modelData.label
+                description: (root.scopeIsDevice
+                  && Model.isInherited(root.cfg, root.scope, rowWrap.modelData.key))
+                  ? "Inherited from Global" : ""
                 foreground: root.fg
                 accent: root.accent
                 fontFamily: root.fontFamily
-                checked: Model.effectiveToggle(root.cfg, sync.liveValues, rowWrap.modelData.key)
+                checked: Model.effectiveToggle(root.cfg, sync.liveValues, root.scope, rowWrap.modelData.key)
                 hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
                   && root.navItems[root.cursorIndex].kind === "toggle"
                   && root.navItems[root.cursorIndex].key === rowWrap.modelData.key
                 onClicked: root.setToggle(rowWrap.modelData.key, rowWrap.modelData.field,
-                  !Model.effectiveToggle(root.cfg, sync.liveValues, rowWrap.modelData.key))
+                  !Model.effectiveToggle(root.cfg, sync.liveValues, root.scope, rowWrap.modelData.key))
                 onHovered: function (h) {
                   if (h) {
                     root.cursorActive = true
-                    for (var i = 0; i < root.navItems.length; i++)
-                      if (root.navItems[i].kind === "toggle" && root.navItems[i].key === rowWrap.modelData.key) root.cursorIndex = i
+                    root.setCursorToKind("toggle", rowWrap.modelData.key)
                   }
                 }
               }
@@ -275,7 +479,7 @@ Panel {
             { value: "normal", label: "Normal" },
             { value: "fast", label: "Fast" }
           ]
-          value: Model.effectiveScroll(root.cfg, sync.liveValues)
+          value: Model.effectiveScroll(root.cfg, sync.liveValues, root.scope)
           foreground: root.fg
           background: root.bar ? root.bar.background : Color.background
           accent: root.accent
@@ -286,11 +490,26 @@ Panel {
             && root.navItems[root.cursorIndex].kind === "scroll") ? root.scrollIndex() : -1
           onChanged: function (v) { root.setScroll(v) }
           onHovered: function (index, isHovered) {
-            if (isHovered) {
-              root.cursorActive = true
-              for (var i = 0; i < root.navItems.length; i++)
-                if (root.navItems[i].kind === "scroll") root.cursorIndex = i
-            }
+            if (isHovered) { root.cursorActive = true; root.setCursorToKind("scroll") }
+          }
+        }
+
+        // ---- reset to global (device scope with overrides) ----
+        Button {
+          id: resetButton
+          width: parent.width
+          visible: root.scopeIsDevice && Model.deviceOverrideCount(root.cfg, root.scope) > 0
+          text: "Reset " + root.scopeLabel + " to Global"
+          bordered: true
+          foreground: root.fg
+          background: root.bar ? root.bar.background : Color.background
+          accent: root.accent
+          fontFamily: root.fontFamily
+          hasCursor: root.cursorActive && root.navItems[root.cursorIndex]
+            && root.navItems[root.cursorIndex].kind === "reset"
+          onClicked: { resetConfirm.selectedIndex = 1; root.resetPending = true }
+          onHovered: function (h) {
+            if (h) { root.cursorActive = true; root.setCursorToKind("reset") }
           }
         }
 
@@ -308,6 +527,24 @@ Panel {
           font.pixelSize: Style.font.caption
         }
       }
+
+      // Reset-to-global confirmation. Driven through the panel's semantic
+      // key signals (moveCursor / activateCursor / close) while resetPending,
+      // so it needs no key handler of its own.
+      ConfirmDialog {
+        id: resetConfirm
+        anchors.fill: parent
+        z: 50
+        opened: root.resetPending
+        message: "Reset " + root.scopeLabel + " to the Global settings?"
+        confirmText: "Reset"
+        cancelText: "Keep"
+        background: root.bar ? root.bar.background : Color.background
+        foreground: root.fg
+        fontFamily: root.fontFamily
+        onCanceled: root.resetPending = false
+        onConfirmed: root.doResetToGlobal()
+      }
     }
   }
 
@@ -315,6 +552,7 @@ Panel {
     if (opened) {
       cursorActive = false
       cursorIndex = 0
+      resetPending = false
       sync.refresh()
     }
   }

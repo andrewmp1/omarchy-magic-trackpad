@@ -10,6 +10,35 @@ All notable changes to this plugin are documented here. The format follows
 
 ## [Unreleased]
 
+Targets **v0.3.0**. (v0.2.0 shipped the marketplace security-review
+hardening.)
+
+### Added
+
+- **Per-device touchpad overrides.** A **Scope** picker switches the panel
+  between **Global** (`hl.config` — Hyprland's `input.touchpad` section, the
+  v0.1 behaviour) and each detected touchpad (`hl.device({ name = "<slug>",
+  … })`). A device scope inherits any option it hasn't overridden from Global;
+  toggle rows show an "Inherited from Global" caption until you change them.
+  **Reset to Global** (with a confirm step) clears a device's overrides.
+- Touchpad detection: `hyprctl devices -j` cross-referenced with
+  `/proc/bus/input/devices` (BUTTONPAD / absolute-axis bits); falls back to
+  offering every pointer device if nothing there looks like a touchpad. Device
+  names are accepted only if they match Hyprland's slug shape
+  (`^[a-z0-9][a-z0-9._-]{0,127}$`) — refused, never repaired.
+- Config document is now v2: `{ version: 2, global: {…}, devices: { "<slug>":
+  {…} } }`. A v0.1 document is migrated to `global` on first load with nothing
+  lost; `ConfigStore` always writes v2.
+
+### Fixed
+
+- `BoundedRead` treated every read as refused. It checked `proc.exitCode`,
+  which does not exist on Quickshell 0.3.1's `Process` (the code arrives only
+  as the `onExited(exitCode, …)` argument), so `exitCode === 0` was always
+  false. This silently disabled config read-back (external edits to
+  `magic-trackpad.json` were ignored) and forced v0.3's touchpad detection
+  into its fallback path.
+
 ## [0.2.0] — 2026-09-08
 
 ### Security

@@ -25,11 +25,16 @@ Item {
   readonly property string configDir: Quickshell.env("XDG_CONFIG_HOME") || (home + "/.config")
   readonly property string luaPath: configDir + "/hypr/omarchy-magic-trackpad.lua"
   readonly property string hyprlandLuaPath: configDir + "/hypr/hyprland.lua"
+  readonly property string procInputPath: "/proc/bus/input/devices"
 
   // Byte ceilings. `hyprctl getoption -j` for one option is a few hundred
   // bytes; anything larger is refused, not truncated (cap + 1 detection).
   readonly property int optionCap: 4096
   readonly property int errorCap: 2048
+  // `hyprctl devices -j` on a busy rig (tablets, several keyboards) is a few
+  // KB; /proc/bus/input/devices likewise. Both are capped well above that and
+  // refused, not truncated, past the ceiling.
+  readonly property int devicesCap: 131072
   readonly property int termMs: 10000
   readonly property int killMs: 13000
 
@@ -52,6 +57,7 @@ Item {
   property var _pending: ({})
 
   function refresh() {
+    refreshDevices()
     if (refreshProc.running) return
     var q = []
     for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++)
@@ -132,6 +138,113 @@ Item {
       }
     }
     onExited: root._refreshFinished()
+  }
+
+  // -------------------------------------------------------------- device list
+
+  // `hyprctl devices -j` (pointer devices, slugified) cross-referenced with
+  // /proc/bus/input/devices (BUTTONPAD / absolute-axis bits) picks out the
+  // touchpads — see Model.touchpadDevices. `hyprctl devices` runs under its
+  // own TERM/KILL watchdog; /proc is read through BoundedRead (nofollow,
+  // nonblock, capped). Both are untrusted: a device sets its own name string,
+  // so the only names that survive are the ones Model.isDeviceName accepts,
+  // and the list handed to the UI is length-bounded.
+  property var touchpadDevices: []
+
+  property string _devRaw: ""
+  property bool _devOverflow: false
+  property bool _devExited: false
+  property int _devExitCode: 1
+  property string _procText: ""
+  property bool _procOk: false
+  property bool _procDone: false
+
+  function refreshDevices() {
+    if (devicesProc.running) return
+    _devRaw = ""
+    _devOverflow = false
+    _devExited = false
+    _devExitCode = 1
+    _procText = ""
+    _procOk = false
+    _procDone = false
+    procReader.read(root.procInputPath)
+    devicesProc.command = ["/usr/bin/hyprctl", "devices", "-j"]
+    devWatchdogTerm.restart()
+    devicesProc.running = true
+  }
+
+  function _maybeFinishDevices() {
+    if (!_devExited || !_procDone) return
+    // A failed / oversized `hyprctl devices` read means no reliable list —
+    // keep whatever was there rather than dropping to a bogus one.
+    if (_devOverflow || _devExitCode !== 0) return
+    var proc = _procOk ? _procText : ""
+    var list = Model.touchpadDevices(_devRaw, proc)
+    // Bound what reaches the UI regardless of what the inputs claimed.
+    touchpadDevices = Array.isArray(list) ? list.slice(0, 12) : []
+  }
+
+  Process {
+    id: devicesProc
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._devRaw.length + data.length > root.devicesCap) {
+          root._devOverflow = true
+          root._devRaw = ""
+          devicesProc.signal(15)
+          return
+        }
+        root._devRaw += data
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._devRaw.length + data.length > root.devicesCap) {
+          root._devOverflow = true
+          devicesProc.signal(15)
+        }
+      }
+    }
+    onExited: function (exitCode, exitStatus) {
+      devWatchdogTerm.stop()
+      devWatchdogKill.stop()
+      root._devExitCode = (exitCode === 0) ? 0 : 1
+      if (root._devOverflow || exitCode !== 0)
+        console.warn("magic-trackpad: `hyprctl devices` refused (",
+                     root._devOverflow ? "over cap" : "exit " + exitCode, ")")
+      root._devExited = true
+      root._maybeFinishDevices()
+    }
+  }
+
+  BoundedRead {
+    id: procReader
+    cap: 262144          // /proc/bus/input/devices; refuse absurd sizes
+    onFinished: function (ok, overflow, absent, content) {
+      root._procOk = ok
+      root._procText = ok ? content : ""
+      root._procDone = true
+      root._maybeFinishDevices()
+    }
+  }
+
+  Timer {
+    id: devWatchdogTerm
+    interval: root.termMs
+    repeat: false
+    onTriggered: {
+      if (devicesProc.running) devicesProc.signal(15)
+      devWatchdogKill.restart()
+    }
+  }
+  Timer {
+    id: devWatchdogKill
+    interval: root.killMs - root.termMs
+    repeat: false
+    onTriggered: if (devicesProc.running) devicesProc.signal(9)
   }
 
   // -------------------------------------------------------------- live apply
