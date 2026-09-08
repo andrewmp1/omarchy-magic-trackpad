@@ -93,10 +93,11 @@ Panel {
     onLoaded: function (existed) {
       if (root.appliedOnce) return
       root.appliedOnce = true
-      // Install the loader line + managed file (empty on a first run — the
-      // plugin only writes an option once the user changes it), then push
-      // whatever the document already holds to the running session.
-      sync.writeManaged(store.config)
+      // Startup is read-only: push whatever the document already holds to the
+      // running session and read Hyprland's current values. Nothing is
+      // written until the user changes something — the managed Lua file and
+      // the loader line are installed by writeManaged() from the mutation
+      // handlers, not here.
       if (existed) sync.applyLive(store.config)
       sync.refresh()
     }
@@ -201,6 +202,7 @@ Panel {
             spacing: Style.space(1)
             Text {
               text: "Trackpad"
+              textFormat: Text.PlainText
               color: root.fg
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
@@ -208,6 +210,7 @@ Panel {
             }
             Text {
               text: root.notice !== "" ? root.notice : Model.summaryLine(root.cfg).toUpperCase()
+              textFormat: Text.PlainText
               color: Qt.darker(root.fg, 1.45)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -296,6 +299,7 @@ Panel {
         Text {
           width: parent.width
           wrapMode: Text.WordWrap
+          textFormat: Text.PlainText
           text: sync.lastError !== ""
             ? ("hyprctl: " + sync.lastError)
             : "Finger-swipe gestures, Taptic Engine strength, and custom gestures come in a later version."

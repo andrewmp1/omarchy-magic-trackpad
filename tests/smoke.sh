@@ -68,11 +68,18 @@ else
   say "no QML runtime errors: ok"
 fi
 
-# 4. managed file + loader line
-[ -f "$CFGDIR/hypr/omarchy-magic-trackpad.lua" ] && say "managed lua written: ok" \
-  || { say "managed lua missing"; fail=1; }
-grep -q "omarchy-magic-trackpad" "$CFGDIR/hypr/hyprland.lua" 2>/dev/null \
-  && say "loader line in hyprland.lua: ok" || { say "loader line missing"; fail=1; }
+# 4. consent-gated writes: the plugin must not touch hyprland.lua at startup —
+#    the loader line is installed when the user first changes a setting. If it
+#    is present it must appear exactly once.
+[ -f "$CFGDIR/hypr/omarchy-magic-trackpad.lua" ] \
+  && say "managed lua present (written on a previous change): ok" \
+  || say "managed lua absent (expected until the first change): ok"
+n="$(grep -c -- '-- omarchy-magic-trackpad' "$CFGDIR/hypr/hyprland.lua" 2>/dev/null || true)"
+case "$n" in
+  0) say "loader line absent until first change: ok" ;;
+  1) say "loader line present exactly once: ok" ;;
+  *) say "loader line duplicated ($n occurrences)"; fail=1 ;;
+esac
 
 [ "$fail" -eq 0 ] && say "SMOKE OK" || say "SMOKE FAILED"
 exit "$fail"

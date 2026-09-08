@@ -9,11 +9,18 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 | File | Role |
 | --- | --- |
 | `Model.js` | All pure logic: the setting catalogue, `hyprctl getoption` parsing, the apply plan, the generated Lua, the loader-line guard. No QML imports — `node --test tests/model.test.js` runs it directly. |
-| `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk + in memory, normalized on every read. Source of truth. |
-| `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"`), the read-back (`hyprctl getoption -j`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua`. |
+| `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk + in memory, normalized on every read. Source of truth. Reads via `BoundedRead`; its `FileView` is watcher + writer only. |
+| `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"`), the read-back (bounded `/usr/bin/hyprctl getoption -j`, argv arrays), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua` (installed fail-closed on the first setting change). |
+| `BoundedRead.qml` | The one file-read primitive: `/usr/bin/dd` as a fixed argv array with `iflag=nofollow,nonblock,count_bytes`, byte cap + overflow refusal, ENOENT distinguished from refusal, TERM/KILL watchdog. |
 | `BarWidget.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. |
-| `bin/magic-haptic` | Vendored from the research repo. Backend for the **planned** haptics phase; unused in v0.1. |
-| `setup.sh` | One-time udev rule for the **planned** haptics phase. Not needed for v0.1. |
+
+The haptics backend (`magic-haptic`, the udev setup) is deliberately **not**
+vendored here: it is root-capable (sudo, systemd, udev, raw hidraw) and
+unused by v0.1, while `omarchy plugin add` ships the whole repo into the
+user's plugin dir. It lives in the `magic-trackpad-haptics` research repo
+and gets re-vendored only when phase 3 lands — keeping it out also keeps
+the marketplace security baseline free of `privilege` / `service-management`
+/ `installer` findings.
 
 ## Scope: four phases
 
@@ -26,8 +33,8 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
    can differ. `Model.js` grows a device dimension; `HyprSync` targets the
    device section.
 3. **Haptics.** Apple Magic Trackpad Taptic Engine strength via `magic-haptic`
-   + a udev `input`-group perms rule (`setup.sh`). Adds a "Haptics" section
-   and a per-unit picker.
+   (vendored from the research repo when this phase lands) + a udev
+   `input`-group perms rule. Adds a "Haptics" section and a per-unit picker.
 4. **Custom gestures.** Opt-in userspace daemon: host-click mode (`0x21=1`) +
    raw multitouch → `uinput`. Finger-count buttons, force-press, corner taps.
 
@@ -52,7 +59,11 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
   re-instantiate a live bar widget.** Use `omarchy restart shell` when
   testing anything at construction time.
 - **A `FileView` on a path that doesn't exist yet can emit neither `onLoaded`
-  nor `onLoadFailed`.** `ConfigStore` has a 500ms fallback timer.
+  nor `onLoadFailed`.** Reads no longer go through `FileView` at all —
+  `BoundedRead` (capped, nofollow/nonblock `dd`) reports `absent` explicitly,
+  and `ConfigStore` keeps a 500ms fallback timer purely as a dead-man switch.
+  The `FileView`s are watcher/writer only (`preload: false`,
+  `blockAllReads: true`); calling `.text()` on one is a bug by construction.
 - **Two handlers for one property (e.g. a second `Component.onCompleted`) is a
   fatal load error.** `qmllint` still exits 0.
 - **`qmllint` can't resolve `qs.Commons` / `qs.Ui` outside Quickshell.**

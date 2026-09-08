@@ -83,6 +83,28 @@ omarchy plugin enable andrewmp1.magic-trackpad
 | `~/.config/hypr/omarchy-magic-trackpad.lua` | generated — re-applies your settings on every Hyprland load |
 | `~/.config/hypr/hyprland.lua` | +1 guarded loader line (`-- omarchy-magic-trackpad`) |
 
+## Security boundary
+
+The plugin's entire footprint, for the record:
+
+- **Runs:** `hyprctl` and `/usr/bin/dd` (coreutils — capped, no-symlink reads
+  of its own config files). Nothing else. No daemon, no listener, no network.
+- **Writes:** only the three paths in the table above.
+- **Escalation:** none. No `sudo`, no `pkexec`, no systemd units, no udev
+  rules, no device nodes — the plugin runs as your user inside
+  `omarchy-shell`.
+- **Removal:** delete the plugin and the two config files and every trace is
+  gone; the loader line in `hyprland.lua` is the only edit to an existing
+  file, and it's one guarded, commented line.
+
+Code staged for the planned haptics phase (`magic-haptic`, the udev setup)
+is root-capable and therefore **deliberately not vendored in this repo** —
+`omarchy plugin add` ships the whole checkout into your plugin directory.
+It lives in the
+[magic-trackpad-haptics](https://github.com/andrewmp1/magic-trackpad-haptics)
+research repo and will be re-added, separately reviewed, only when that
+phase actually ships.
+
 ## Tested
 
 Six layers, run by `bash scripts/check.sh`:
@@ -117,7 +139,7 @@ Issues and PRs welcome.
   and fill in the template — `omarchy version`, `hyprctl version`, and the
   output of `bash scripts/check.sh` go a long way.
 - **Sending a PR?** Read [CONTRIBUTING.md](CONTRIBUTING.md) and
-  [AGENTS.md](AGENTS.md) (architecture + the Omarchy-plugin gotchas), run
+  [AGENTS.md](docs/AGENTS.md) (architecture + the Omarchy-plugin gotchas), run
   `bash scripts/check.sh`, and keep `Model.js` pure so `node --test` still
   covers the logic.
 
@@ -138,7 +160,10 @@ Full checklist: [docs/PUBLISHING.md](docs/PUBLISHING.md).
   `device[<name>]`) instead — e.g. natural scroll on the laptop pad but not on
   a plugged-in Magic Trackpad.
 - **Haptics.** Apple Magic Trackpad Taptic Engine strength (Off / Low / Medium
-  / High) and click recovery — see `bin/magic-haptic` and `setup.sh`.
+  / High) and click recovery. The backend is prototyped in the
+  [magic-trackpad-haptics](https://github.com/andrewmp1/magic-trackpad-haptics)
+  research repo; it needs a udev rule and a small daemon, so it ships as a
+  deliberate, separately reviewed addition.
 - **Custom gestures.** Finger-count buttons, force-press, corner taps via an
   opt-in userspace daemon.
 
@@ -152,6 +177,4 @@ rm -f ~/.config/hypr/omarchy-magic-trackpad.lua ~/.config/omarchy/magic-trackpad
 
 ## License
 
-MIT © 2026 Drew Purdy. `bin/magic-haptic` is vendored from the
-[magic-trackpad-haptics](https://github.com/andrewmp1/magic-trackpad-haptics)
-research repo for the planned haptics phase.
+MIT © 2026 Drew Purdy.

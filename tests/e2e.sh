@@ -126,6 +126,10 @@ fi
 
 # --- test 4: persistence — the managed .lua re-applies after `hyprctl reload`
 if [ -f "$LUA" ] && grep -q "hl.config" "$LUA"; then
+  HLUA="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/hyprland.lua"
+  grep -q -- '-- omarchy-magic-trackpad' "$HLUA" \
+    && say "loader line installed on first change: ok" \
+    || { say "loader line missing from hyprland.lua after a change"; fail=1; }
   keep="$(getf scroll_factor)"
   hyprctl reload >/dev/null 2>&1; sleep 1
   now="$(getf scroll_factor)"

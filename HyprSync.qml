@@ -7,10 +7,15 @@ import "Model.js" as Model
 //
 //   refresh()         re-reads the current touchpad option values into
 //                     `liveValues` (used to show state the user hasn't set).
-//   applyLive(cfg)     runs the `hyprctl keyword` plan now.
+//   applyLive(cfg)     runs the apply plan now.
 //   runOne(argv)       queues one `hyprctl` invocation.
 //   writeManaged(cfg)  regenerates ~/.config/hypr/omarchy-magic-trackpad.lua
-//                      and appends one guarded loader line to hyprland.lua.
+//                      and installs the guarded loader line in hyprland.lua.
+//
+// Hardening: every child process is a fixed argv array (no shell to inject
+// into), `hyprctl` is pinned to an absolute path, each read is capped in
+// bytes before it is parsed, and every process is under a watchdog that
+// TERMinates — then KILLs — anything that outlives its deadline.
 //
 // All of it is safe when Hyprland is not running — hyprctl just fails.
 Item {
@@ -21,6 +26,13 @@ Item {
   readonly property string luaPath: configDir + "/hypr/omarchy-magic-trackpad.lua"
   readonly property string hyprlandLuaPath: configDir + "/hypr/hyprland.lua"
 
+  // Byte ceilings. `hyprctl getoption -j` for one option is a few hundred
+  // bytes; anything larger is refused, not truncated (cap + 1 detection).
+  readonly property int optionCap: 4096
+  readonly property int errorCap: 2048
+  readonly property int termMs: 10000
+  readonly property int killMs: 13000
+
   property string lastError: ""
   property bool loaderInstalled: false
 
@@ -30,56 +42,102 @@ Item {
 
   // -------------------------------------------------------------- read-back
 
-  // One shell call emits `key<TAB>value` lines for every option we care
-  // about. `hyprctl getoption -j` prints one JSON object; jq-free parsing
-  // happens in Model.parseGetOption.
-  readonly property string _refreshScript: {
-    var lines = ["set -e"]
-    for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++) {
-      var t = Model.TOUCHPAD_TOGGLES[i]
-      lines.push('printf "%s\\t" ' + t.key + '; hyprctl getoption -j "' + t.option + '" | tr -d "\\n"; printf "\\n"')
-    }
-    lines.push('printf "%s\\t" scrollSpeed; hyprctl getoption -j "input:touchpad:scroll_factor" | tr -d "\\n"; printf "\\n"')
-    return lines.join("\n")
-  }
+  // One bounded `hyprctl getoption -j` per option, run sequentially. The
+  // option names come from the closed catalogue in Model.js — no user data
+  // reaches an argument, and there is no shell to build one for.
+  property var _refreshQueue: []
+  property var _refreshJob: null
+  property string _refreshRaw: ""
+  property bool _refreshOverflow: false
+  property var _pending: ({})
 
   function refresh() {
     if (refreshProc.running) return
-    refreshProc.command = ["bash", "-c", _refreshScript]
+    var q = []
+    for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++)
+      q.push({ key: Model.TOUCHPAD_TOGGLES[i].key, option: Model.TOUCHPAD_TOGGLES[i].option })
+    q.push({ key: "scrollSpeed", option: Model.SCROLL_OPTION })
+    _refreshQueue = q
+    _pending = {}
+    _refreshNext()
+  }
+
+  function _refreshNext() {
+    if (_refreshQueue.length === 0) return
+    var job = _refreshQueue[0]
+    _refreshQueue = _refreshQueue.slice(1)
+    _refreshJob = job
+    _refreshRaw = ""
+    _refreshOverflow = false
+    refreshProc.command = ["/usr/bin/hyprctl", "getoption", "-j", job.option]
+    root._watchTarget = "refresh"
+    watchdogTerm.restart()
     refreshProc.running = true
   }
 
-  function _applyRefresh(raw) {
-    var next = {}
-    var rows = String(raw || "").split("\n")
-    for (var i = 0; i < rows.length; i++) {
-      var tab = rows[i].indexOf("\t")
-      if (tab <= 0) continue
-      var key = rows[i].substring(0, tab)
-      var json = rows[i].substring(tab + 1)
-      var v = Model.parseGetOption(json)
-      if (key === "scrollSpeed") {
-        var best = "normal", bestD = 1e9
-        for (var s = 0; s < Model.SCROLL_STOPS.length; s++) {
-          var d = Math.abs(Model.SCROLL_STOPS[s].value - Number(v))
-          if (isFinite(d) && d < bestD) { bestD = d; best = Model.SCROLL_STOPS[s].key }
-        }
-        next[key] = best
+  function _absorb(key, raw) {
+    var v = Model.parseGetOption(raw)
+    if (key === "scrollSpeed") {
+      var best = "normal", bestD = 1e9
+      for (var s = 0; s < Model.SCROLL_STOPS.length; s++) {
+        var d = Math.abs(Model.SCROLL_STOPS[s].value - Number(v))
+        if (isFinite(d) && d < bestD) { bestD = d; best = Model.SCROLL_STOPS[s].key }
+      }
+      _pending[key] = best
+    } else {
+      _pending[key] = (v === true || v === false) ? v : false
+    }
+  }
+
+  function _refreshFinished() {
+    watchdogTerm.stop()
+    watchdogKill.stop()
+    var key = _refreshJob ? _refreshJob.key : ""
+    if (key !== "") {
+      if (_refreshOverflow) {
+        console.warn("magic-trackpad: getoption output exceeded", optionCap, "bytes for", key, "- refusing it")
       } else {
-        next[key] = (v === true || v === false) ? v : false
+        _absorb(key, _refreshRaw)
       }
     }
-    liveValues = next
+    if (_refreshQueue.length > 0) { _refreshNext(); return }
+    liveValues = _pending
   }
 
   Process {
     id: refreshProc
-    stdout: StdioCollector { id: refreshOut; waitForEnd: true; onStreamFinished: root._applyRefresh(text) }
+
+    // splitMarker: "" streams every chunk; the cap is enforced as the bytes
+    // arrive, before any buffering beyond it. Overflow kills the process and
+    // refuses the value instead of truncating it into shape.
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._refreshRaw.length + data.length > root.optionCap) {
+          root._refreshOverflow = true
+          root._refreshRaw = ""
+          refreshProc.signal(15)
+          return
+        }
+        root._refreshRaw += data
+      }
+    }
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._refreshRaw.length + data.length > root.optionCap) {
+          root._refreshOverflow = true
+          refreshProc.signal(15)
+        }
+      }
+    }
+    onExited: root._refreshFinished()
   }
 
   // -------------------------------------------------------------- live apply
 
   property var _queue: []
+  property string _liveErr: ""
 
   function applyLive(cfg) {
     _queue = _queue.concat(Model.applyPlan(cfg))
@@ -95,22 +153,52 @@ Item {
     if (_queue.length === 0) return
     var next = _queue[0]
     _queue = _queue.slice(1)
+    _liveErr = ""
     liveProc.command = next
+    root._watchTarget = "live"
+    watchdogTerm.restart()
     liveProc.running = true
   }
 
   Process {
     id: liveProc
-    stderr: StdioCollector {
-      id: liveErr
-      onStreamFinished: {
-        var m = String(text || "").trim()
-        root.lastError = (m.length > 0 && m !== "ok") ? m : ""
+    stderr: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._liveErr.length + data.length <= root.errorCap) root._liveErr += data
       }
     }
     onExited: {
+      watchdogTerm.stop()
+      watchdogKill.stop()
+      var m = String(root._liveErr || "").trim()
+      root.lastError = (m.length > 0 && m !== "ok") ? m : ""
       root._flush()
       if (root._queue.length === 0) root.refresh()
+    }
+  }
+
+  // Deadline + escalation for every child process: TERM at termMs, KILL at
+  // killMs if it ignored the TERM. Single exec'd binaries, so there is no
+  // shell tree to orphan.
+  property string _watchTarget: ""
+  Timer {
+    id: watchdogTerm
+    interval: root.termMs
+    repeat: false
+    onTriggered: {
+      if (root._watchTarget === "refresh" && refreshProc.running) refreshProc.signal(15)
+      else if (root._watchTarget === "live" && liveProc.running) liveProc.signal(15)
+      watchdogKill.restart()
+    }
+  }
+  Timer {
+    id: watchdogKill
+    interval: root.killMs - root.termMs
+    repeat: false
+    onTriggered: {
+      if (root._watchTarget === "refresh" && refreshProc.running) refreshProc.signal(9)
+      else if (root._watchTarget === "live" && liveProc.running) liveProc.signal(9)
     }
   }
 
@@ -118,12 +206,52 @@ Item {
 
   function writeManaged(cfg) {
     luaFile.setText(Model.generateLua(cfg))
-    hyprlandLuaFile.reload()
+    // Re-check the loader line on every write. hyprland.lua is the user's
+    // shared config: it is read through BoundedRead (no follow, capped) and
+    // the marked line is appended only when the marker is absent — a line
+    // the user removed is not fought over and a duplicate is never added.
+    hyprlandLuaRead()
   }
 
+  function hyprlandLuaRead() {
+    luaReader.read(root.hyprlandLuaPath)
+  }
+
+  function _hyprlandLuaRead(ok, overflow, absent, content) {
+    if (absent) {
+      root.loaderInstalled = false
+      return
+    }
+    if (!ok) {
+      // Symlink, FIFO, oversized, unreadable: fail closed — do not modify a
+      // shared file whose identity we could not establish.
+      root.loaderInstalled = false
+      console.warn("magic-trackpad: hyprland.lua read refused — loader line not installed")
+      return
+    }
+    if (Model.needsLoader(content)) {
+      // atomicWrites: temp + rename, which replaces a symlink rather than
+      // writing through it.
+      hyprlandLuaFile.setText(Model.withLoader(content))
+    }
+    root.loaderInstalled = true
+  }
+
+  BoundedRead {
+    id: luaReader
+    cap: 262144          // hyprland.lua is user config; refuse absurd sizes
+    onFinished: function (ok, overflow, absent, content) {
+      root._hyprlandLuaRead(ok, overflow, absent, content)
+    }
+  }
+
+  // Write-only: all reads of these files go through BoundedRead above.
+  // blockAllReads: true makes an accidental .text() a bug by construction.
   FileView {
     id: luaFile
     path: root.luaPath
+    preload: false
+    blockAllReads: true
     atomicWrites: true
     watchChanges: false
     printErrors: false
@@ -132,16 +260,11 @@ Item {
   FileView {
     id: hyprlandLuaFile
     path: root.hyprlandLuaPath
+    preload: false
+    blockAllReads: true
     atomicWrites: true
     watchChanges: false
     printErrors: false
-
-    onLoaded: {
-      var current = text()
-      if (Model.needsLoader(current)) setText(Model.withLoader(current))
-      root.loaderInstalled = true
-    }
-    onLoadFailed: root.loaderInstalled = false
   }
 
   Component.onCompleted: refresh()
