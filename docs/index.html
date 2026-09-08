@@ -320,11 +320,16 @@
     <table>
       <tr><td>Tap to click</td><td>tap the pad instead of pressing down</td></tr>
       <tr><td>Two-finger right-click</td><td>2 fingers → right, 3 → middle <span class="k">clickfinger_behavior</span></td></tr>
+      <tr><td>Two-finger tap</td><td>Right or Middle <span class="k">tap_button_map</span></td></tr>
       <tr><td>Natural scroll</td><td>content follows the fingers</td></tr>
       <tr><td>Disable while typing</td><td>ignore the pad briefly after a keypress</td></tr>
-      <tr><td>Tap and drag</td><td>tap-tap-hold to start a drag</td></tr>
+      <tr><td>Tap and drag · Drag lock</td><td>tap-tap-hold to drag; keep dragging through a brief lift</td></tr>
+      <tr><td>Three-finger drag</td><td>move a window with three fingers <span class="k">drag_3fg</span></td></tr>
       <tr><td>Middle-click emulation</td><td>left + right together → middle</td></tr>
-      <tr><td>Scroll speed</td><td>Slow · Normal · Fast <span class="k">scroll_factor 0.2 / 0.4 / 0.8</span></td></tr>
+      <tr><td>Scroll speed · method</td><td>Slow · Normal · Fast <span class="k">scroll_factor</span>; Two-finger or Edge</td></tr>
+      <tr><td>Pointer speed · acceleration</td><td>5 steps <span class="k">sensitivity</span>; Adaptive or Flat <span class="k">accel_profile</span></td></tr>
+      <tr><td>Disable this touchpad</td><td>turn a specific pad off entirely <span class="k">hl.device({ enabled = false })</span></td></tr>
+      <tr><td>Scope</td><td>Global, or a per-touchpad override <span class="k">hl.device</span> — natural scroll on the laptop pad but off on an external Magic Trackpad, say. A device scope inherits what it hasn't overridden; the header shows that pad's transport and battery. <em>Reset to Global</em> clears it.</td></tr>
     </table>
   </section>
 
@@ -332,7 +337,7 @@
     <h2>How it works</h2>
     <div class="flow">
       <div><span class="n">1</span><span>Your settings live in <code>~/.config/omarchy/magic-trackpad.json</code> — plain JSON you can read, diff, and keep in your dotfiles.</span></div>
-      <div><span class="n">2</span><span>A change is applied live with <code>hyprctl eval "hl.config({ input = { touchpad = { … } } })"</code>. Omarchy runs Hyprland's Lua parser, which rejects <code>hyprctl keyword</code>.</span></div>
+      <div><span class="n">2</span><span>A Global change is applied live with <code>hyprctl eval "hl.config({ input = { touchpad = { … } } })"</code>; a per-device change with <code>hl.device({ name = "&lt;slug&gt;", … })</code>. Omarchy runs Hyprland's Lua parser, which rejects <code>hyprctl keyword</code>.</span></div>
       <div><span class="n">3</span><span>The same change lands in <code>~/.config/hypr/omarchy-magic-trackpad.lua</code>, loaded by one guarded <code>dofile</code> line the plugin appends to <code>hyprland.lua</code> — so it survives a restart.</span></div>
     </div>
   </section>
@@ -342,7 +347,7 @@
     <p>Six layers, run by <code>bash scripts/check.sh</code>. Layers 1–3 run in
     CI on every push; 4–6 need a live Omarchy desktop.</p>
     <div class="layers">
-      <div class="layer"><p class="t">1 · unit</p><p class="d">config normalization, the exact <code>hl.config</code> strings, the apply plan</p></div>
+      <div class="layer"><p class="t">1 · unit</p><p class="d">config normalization + v1→v2 config-document migration, touchpad detection, the scope cascade, the exact <code>hl.config</code> / <code>hl.device</code> strings, the apply plan</p></div>
       <div class="layer"><p class="t">2 · manifest</p><p class="d">schema + <code>Panel.qml</code> stays in step with the plugin id</p></div>
       <div class="layer"><p class="t">3 · lua syntax</p><p class="d">the generated <code>.lua</code> is parsed with <code>luac</code></p></div>
       <div class="layer"><p class="t">4 · hyprland contract</p><p class="d">each setting, applied with the plugin's own command, actually moves <code>hyprctl getoption</code></p></div>

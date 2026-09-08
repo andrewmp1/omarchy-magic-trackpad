@@ -84,14 +84,17 @@ Item {
         if (root._err.length + data.length <= 2048) root._err += data
       }
     }
-    onExited: {
+    // Quickshell's Process has no exitCode *property* — the code is delivered
+    // only as this handler's first argument. Reading `proc.exitCode` yields
+    // undefined, which fails `=== 0` and turns every read into a refusal.
+    onExited: function (exitCode, exitStatus) {
       termTimer.stop()
       killTimer.stop()
-      var ok = !root._overflow && proc.exitCode === 0
-      var absent = proc.exitCode !== 0 && root._err.indexOf("No such file or directory") >= 0
+      var ok = !root._overflow && exitCode === 0
+      var absent = exitCode !== 0 && root._err.indexOf("No such file or directory") >= 0
       if (!ok) {
         console.warn("magic-trackpad: bounded read of", root._current, "refused (",
-                     root._overflow ? "over cap" : "exit " + proc.exitCode,
+                     root._overflow ? "over cap" : "exit " + exitCode,
                      (absent ? "absent" : root._err.trim()), ")")
       }
       root.finished(ok, root._overflow, absent, ok ? root._buf : "", root._err)

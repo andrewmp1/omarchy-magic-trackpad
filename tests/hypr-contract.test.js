@@ -9,6 +9,7 @@
 const test = require("node:test")
 const assert = require("node:assert/strict")
 const { execFileSync } = require("node:child_process")
+const fs = require("node:fs")
 const M = require("../Model.js")
 
 const inSession = !!process.env.HYPRLAND_INSTANCE_SIGNATURE
@@ -40,15 +41,19 @@ test("getoption -j returns a shape parseGetOption understands", opts, () => {
   assert.ok(v === true || v === false, `unexpected getoption JSON: ${raw}`)
 })
 
+// drag_lock / drag_3fg report back as int (0/1); the rest as bool. Same
+// coercion Model.effectiveToggle applies.
+const isOn = (v) => v === true || (typeof v === "number" && v > 0)
+
 for (const t of M.TOUCHPAD_TOGGLES) {
   test(`live: ${t.field} flips via the plugin's exact command`, opts, () => {
-    const before = getOpt(t.option) === true
+    const before = isOn(getOpt(t.option))
     const target = !before
     try {
       const lua = M.toggleEvalArgs(t.field, target)[2]
       const r = evalLua(lua)
       assert.equal(r.out, "ok", `hyprctl eval failed: ${r.err || r.out}`)
-      assert.equal(getOpt(t.option), target, `${t.option} did not change after ${lua}`)
+      assert.equal(isOn(getOpt(t.option)), target, `${t.option} did not change after ${lua}`)
     } finally {
       evalLua(M.toggleEvalArgs(t.field, before)[2])
     }
@@ -63,6 +68,74 @@ test("live: scroll_factor takes a float via the plugin's command", opts, () => {
     assert.ok(Math.abs(Number(getOpt(M.SCROLL_OPTION)) - 0.8) < 1e-6, "scroll_factor did not become 0.8")
   } finally {
     evalLua(M.toggleEvalArgs(M.SCROLL_FIELD, restore)[2])
+  }
+})
+
+test("live: sensitivity is an `input`-level key, applied via the plugin's command", opts, () => {
+  const before = Number(getOpt(M.POINTER_OPTION))
+  const restore = Number.isFinite(before) ? before : 0
+  const lua = M.toggleEvalArgs(M.POINTER_FIELD, -0.3, M.POINTER_LEVEL)[2]
+  assert.equal(lua, 'hl.config({ input = { sensitivity = -0.3 } })', "wrong Lua for an input-level key")
+  try {
+    assert.equal(evalLua(lua).out, "ok")
+    assert.ok(Math.abs(Number(getOpt(M.POINTER_OPTION)) - -0.3) < 1e-6, "sensitivity did not become -0.3")
+  } finally {
+    evalLua(M.toggleEvalArgs(M.POINTER_FIELD, restore, M.POINTER_LEVEL)[2])
+  }
+})
+
+for (const es of M.ENUM_SETTINGS) {
+  test(`live: ${es.field} enum values apply and move getoption`, opts, () => {
+    const before = getOpt(es.option)
+    try {
+      for (const v of es.values) {
+        const lua = M.toggleEvalArgs(es.field, M.enumValue(es.key, v.key), es.level)[2]
+        assert.equal(evalLua(lua).out, "ok", `eval failed: ${lua}`)
+        assert.equal(getOpt(es.option), v.lua, `${es.option} did not become ${v.lua}`)
+      }
+    } finally {
+      // Empty string clears a Hyprland string option back to its default.
+      evalLua(M.toggleEvalArgs(es.field, before == null ? "" : before, es.level)[2])
+    }
+  })
+}
+
+// Per-device: hl.device({ name = ... }) has no getoption readback, so the
+// contract here is narrower — the command Hyprland accepts is "ok" and does
+// not error. Runs only when a real touchpad is detected.
+function detectedTouchpad() {
+  const dev = hyprctl(["devices", "-j"]).out
+  let proc = ""
+  try { proc = fs.readFileSync("/proc/bus/input/devices", "utf8") } catch (e) { /* fall back */ }
+  const list = M.touchpadDevices(dev, proc)
+  return list.length ? list[0].name : null
+}
+
+test("live: hl.device applies for a detected touchpad and reports ok", opts, () => {
+  const name = detectedTouchpad()
+  if (!name) return // no touchpad on this box — nothing to contract-check
+
+  const globalBefore = getOpt("input:touchpad:natural_scroll") === true
+  try {
+    const args = M.deviceEvalArgs(name, { natural_scroll: !globalBefore })
+    assert.ok(args, `deviceEvalArgs refused the detected name: ${name}`)
+    const r = evalLua(args[2])
+    assert.equal(r.out, "ok", `hyprctl eval failed for hl.device: ${r.err || r.out}`)
+
+    const reset = M.resetDeviceEvalArgs(
+      { version: 2, global: { touchpad: {}, scrollSpeed: null }, devices: {} },
+      { naturalScroll: globalBefore },
+      name
+    )
+    assert.equal(evalLua(reset[2]).out, "ok", "resetDeviceEvalArgs did not apply cleanly")
+  } finally {
+    // Pin the device back to whatever global currently is.
+    const back = M.resetDeviceEvalArgs(
+      { version: 2, global: { touchpad: {}, scrollSpeed: null }, devices: {} },
+      { naturalScroll: globalBefore },
+      name
+    )
+    if (back) evalLua(back[2])
   }
 })
 

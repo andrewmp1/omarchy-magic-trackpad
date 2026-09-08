@@ -48,6 +48,31 @@ const SHAPES = {
   "stale gesture key is ignored": {
     touchpad: { tapToClick: true },
     gestures: { workspaceSwipe: { enabled: true, fingers: 3 } }
+  },
+  "v2: global + one device override": {
+    version: 2,
+    global: { touchpad: { tapToClick: true }, scrollSpeed: "normal" },
+    devices: { "apple-inc.-magic-trackpad": { touchpad: { naturalScroll: false }, scrollSpeed: "slow" } }
+  },
+  "v2: two devices, no global": {
+    version: 2,
+    global: { touchpad: {}, scrollSpeed: null },
+    devices: {
+      "apple-inc.-magic-trackpad": { touchpad: { naturalScroll: true }, scrollSpeed: null },
+      "synps2-synaptics-touchpad": { touchpad: { tapToClick: false }, scrollSpeed: "fast" }
+    }
+  },
+  "v2: pointer speed + enum settings, global and device": {
+    version: 2,
+    global: { touchpad: { tapToClick: true }, scrollSpeed: "slow", pointerSpeed: "fast", accelProfile: "flat", scrollMethod: "edge" },
+    devices: {
+      "apple-inc.-magic-trackpad": { touchpad: {}, pointerSpeed: "slowest", scrollMethod: "2fg", accelProfile: "adaptive" }
+    }
+  },
+  "v2: drag lock, three-finger drag, two-finger-tap target": {
+    version: 2,
+    global: { touchpad: { dragLock: true, threeFingerDrag: false }, tapButtonMap: "middle" },
+    devices: { "apple-inc.-magic-trackpad": { touchpad: { dragLock: true }, tapButtonMap: "right" } }
   }
 }
 

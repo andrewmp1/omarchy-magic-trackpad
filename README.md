@@ -38,11 +38,32 @@ knobs Hyprland already has one click away — no `input.lua` spelunking, no
 |---|---|
 | **Tap to click** | tap the pad instead of pressing down |
 | **Two-finger right-click** | 2 fingers → right, 3 → middle (`clickfinger_behavior`) |
+| **Two-finger tap** | Right or Middle (`tap_button_map`) |
 | **Natural scroll** | content follows the fingers |
 | **Disable while typing** | ignore the pad briefly after a keypress |
-| **Tap and drag** | tap-tap-hold to start a drag |
+| **Tap and drag** · **Drag lock** | tap-tap-hold to drag; keep dragging through a brief lift |
+| **Three-finger drag** | move a window with three fingers (`drag_3fg`) |
 | **Middle-click emulation** | left + right together → middle |
-| **Scroll speed** | Slow · Normal · Fast (`scroll_factor` 0.2 / 0.4 / 0.8) |
+| **Scroll speed** · **Scroll method** | Slow · Normal · Fast (`scroll_factor`); Two-finger or Edge |
+| **Pointer speed** · **acceleration** | 5 steps (`sensitivity`); Adaptive or Flat (`accel_profile`) |
+| **Disable this touchpad** | turn a specific pad off entirely (`hl.device({ enabled = false })`) |
+
+### Scopes
+
+A **Scope** picker at the top of the panel switches between **Global** and each
+touchpad the system reports. Global writes Hyprland's `input` section; picking a
+specific pad writes an `hl.device` block for that pad only. A device scope
+inherits every option it hasn't overridden from Global — so you can, say, leave
+natural scroll on for the laptop's built-in pad and turn it off on a plugged-in
+Magic Trackpad. The header shows that pad's transport and battery
+(e.g. `MAGIC TRACKPAD · BLUETOOTH · 69%`). **Reset to Global** clears a device's
+overrides in one step; **Disable this touchpad** (with a confirm) turns it off
+until you re-enable it here. With no external touchpad connected the picker
+stays hidden and the panel behaves exactly as it did in v0.1.
+
+<p align="center">
+  <img src="docs/screenshots/panel-device.png" alt="The panel scoped to a Magic Trackpad: Natural scroll overridden, every other row marked 'Inherited from Global', and a 'Reset Magic Trackpad to Global' button" width="340">
+</p>
 
 ## Install
 
@@ -69,10 +90,17 @@ omarchy plugin enable andrewmp1.magic-trackpad
 ## How it works
 
 - The panel's settings document is `~/.config/omarchy/magic-trackpad.json` —
-  plain JSON you can read, diff, and keep in your dotfiles.
-- A change is applied live with `hyprctl eval "hl.config({ input = { touchpad
-  = { … } } })"` (Omarchy runs Hyprland's Lua config parser, which rejects
-  `hyprctl keyword`).
+  plain JSON you can read, diff, and keep in your dotfiles. It has a `global`
+  section and a `devices` map; a v0.1 document is migrated on first load.
+- A Global change is applied live with `hyprctl eval "hl.config({ input = {
+  … , touchpad = { … } } })"` (pointer speed / acceleration / scroll method
+  sit one level up, beside `touchpad`); a device change with `hyprctl eval
+  "hl.device({ name = "<slug>", … })"` (Omarchy runs Hyprland's Lua config
+  parser, which rejects `hyprctl keyword`). Touchpads are found by
+  cross-referencing `hyprctl devices` with `/proc/bus/input/devices`; only
+  device names matching Hyprland's own slug shape are ever used. A selected
+  pad's battery is read from `/sys/class/power_supply` (located by its `U:
+  Uniq`).
 - The same change is written to `~/.config/hypr/omarchy-magic-trackpad.lua`,
   loaded by one guarded `dofile` line the plugin appends to `hyprland.lua`, so
   it survives a restart.
@@ -87,8 +115,14 @@ omarchy plugin enable andrewmp1.magic-trackpad
 
 The plugin's entire footprint, for the record:
 
-- **Runs:** `hyprctl` and `/usr/bin/dd` (coreutils — capped, no-symlink reads
-  of its own config files). Nothing else. No daemon, no listener, no network.
+- **Runs:** `hyprctl`, `/usr/bin/dd` (coreutils — capped, no-symlink reads of
+  its own config files, `/proc/bus/input/devices`, and a battery `uevent`),
+  and `/usr/bin/find` (to locate the battery node by MAC). Nothing else. No
+  daemon, no listener, no network.
+- **Untrusted input:** `hyprctl` output, device name strings, and the panel
+  summary are treated as data — every `Text` sink is `PlainText`, and a device
+  name reaches an `hl.device` / argv only if it matches an anchored
+  `^[a-z0-9][a-z0-9._-]{0,127}$` (refused, never repaired, otherwise).
 - **Writes:** only the three paths in the table above.
 - **Escalation:** none. No `sudo`, no `pkexec`, no systemd units, no udev
   rules, no device nodes — the plugin runs as your user inside
@@ -109,7 +143,9 @@ phase actually ships.
 
 Six layers, run by `bash scripts/check.sh`:
 
-1. **Unit** — config normalization, the exact `hl.config` strings, the apply plan.
+1. **Unit** — config normalization (incl. v1 → v2 config-document migration),
+   touchpad detection, `U: Uniq` / transport / battery parsing, the scope
+   cascade, the exact `hl.config` / `hl.device` strings, the apply plan.
 2. **Manifest** — schema + `BarWidget.qml` `moduleName` stays in step with the id.
 3. **Config syntax** — the generated `.lua` is parsed with `luac` (a syntax
    error there would break your whole Hyprland config).
@@ -118,8 +154,10 @@ Six layers, run by `bash scripts/check.sh`:
 5. **Shell smoke** — the plugin loads into a running `omarchy-shell` and the
    panel opens with no QML error in the journal.
 6. **Panel e2e** — synthetic keystrokes (`wtype`) drive the rendered panel and
-   confirm the real Hyprland option, the saved document, and persistence
-   across `hyprctl reload`.
+   confirm the real Hyprland option, the saved document (Global, a device
+   scope, and disable/re-enable), and persistence across `hyprctl reload`.
+   Nav indices come from `tests/navindex.js` (a mirror of the panel's cursor
+   list) so new rows never break the offsets.
 
 ```sh
 npm test               # layers 1-3 (portable — also what CI runs)
@@ -152,13 +190,8 @@ Full checklist: [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ## Roadmap
 
-- **v0.2 — finger swipes.** 3/4-finger → switch workspace. Held back because a
+- **v0.4 — finger swipes.** 3/4-finger → switch workspace. Held back because a
   runtime `hl.gesture` can't be cleanly un-registered yet.
-- **Per-device overrides.** Today the panel writes the global
-  `input:touchpad:*` section, so settings apply to every touchpad at once. A
-  device picker would write a Hyprland `device` block (`hl.device{…}` /
-  `device[<name>]`) instead — e.g. natural scroll on the laptop pad but not on
-  a plugged-in Magic Trackpad.
 - **Haptics.** Apple Magic Trackpad Taptic Engine strength (Off / Low / Medium
   / High) and click recovery. The backend is prototyped in the
   [magic-trackpad-haptics](https://github.com/andrewmp1/magic-trackpad-haptics)
