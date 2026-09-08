@@ -58,8 +58,6 @@ glyph in the bar to open the panel.
 <details>
 <summary>Install from a local checkout (development)</summary>
 
-From inside a clone of this repo:
-
 ```sh
 ln -s "$PWD" ~/.config/omarchy/plugins/andrewmp1.magic-trackpad
 omarchy restart shell
