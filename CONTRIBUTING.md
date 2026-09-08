@@ -26,7 +26,7 @@ device access belongs to a later phase — see the roadmap in the README.
 
 ## Sending a PR
 
-1. **Read [`AGENTS.md`](AGENTS.md)** first — it has the architecture and every
+1. **Read [`docs/AGENTS.md`](docs/AGENTS.md)** first — it has the architecture and every
    Omarchy-plugin gotcha that has already bitten this repo (why it's
    `hyprctl eval`, not `keyword`; why `Toggle` is wrapped in an `Item`
    delegate; the `\uXXXX`-is-4-digits rule; …).
@@ -54,7 +54,6 @@ device access belongs to a later phase — see the roadmap in the README.
 | `HyprSync.qml` | live apply (`hyprctl eval`), read-back, the managed `.lua` |
 | `tests/` | `*.test.js` (portable) + `*.sh` (on-desktop) |
 | `scripts/check.sh` | runs every layer |
-| `bin/magic-haptic`, `setup.sh` | staged for the haptics phase; unused in v0.1 |
 
 ## Cutting a release (maintainers)
 

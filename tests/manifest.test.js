@@ -42,7 +42,7 @@ test("BarWidget.qml moduleName stays in step with the manifest id", () => {
 })
 
 test("README + AGENTS reference the same plugin id", () => {
-  for (const f of ["README.md", "AGENTS.md"]) {
+  for (const f of ["README.md", "docs/AGENTS.md"]) {
     const txt = fs.readFileSync(path.join(root, f), "utf8")
     assert.ok(txt.includes(manifest.id), `${f} does not mention ${manifest.id}`)
   }
