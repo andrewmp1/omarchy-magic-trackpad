@@ -15,15 +15,20 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 | `bin/magic-haptic` | Vendored from the research repo. Backend for the **planned** haptics phase; unused in v0.1. |
 | `setup.sh` | One-time udev rule for the **planned** haptics phase. Not needed for v0.1. |
 
-## Scope: three phases
+## Scope: four phases
 
-1. **v0.1 — Level 1 (this).** libinput touchpad options only. No daemon, no
-   permissions. Finger swipes were cut before release — see the gesture note
-   below.
-2. **Haptics.** Apple Magic Trackpad Taptic Engine strength via `magic-haptic`
+1. **v0.1 — Level 1 (this).** *Global* libinput touchpad options only. No
+   daemon, no permissions. Finger swipes were cut before release — see the
+   gesture note below.
+2. **Per-device overrides.** A device picker; writes a Hyprland `device`
+   block (`hl.device{ name = … }` / `device[<name>]`) instead of the global
+   `input.touchpad` section, so a laptop pad and an external Magic Trackpad
+   can differ. `Model.js` grows a device dimension; `HyprSync` targets the
+   device section.
+3. **Haptics.** Apple Magic Trackpad Taptic Engine strength via `magic-haptic`
    + a udev `input`-group perms rule (`setup.sh`). Adds a "Haptics" section
    and a per-unit picker.
-3. **Custom gestures.** Opt-in userspace daemon: host-click mode (`0x21=1`) +
+4. **Custom gestures.** Opt-in userspace daemon: host-click mode (`0x21=1`) +
    raw multitouch → `uinput`. Finger-count buttons, force-press, corner taps.
 
 ## Things that will bite you (from building Omarchy plugins)
@@ -59,7 +64,7 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 ## Validation
 
 ```sh
-bash scripts/check.sh        # runs all four layers; exits non-zero on a real failure
+bash scripts/check.sh        # runs all six layers; exits non-zero on a real failure
 ```
 
 Layers:

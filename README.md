@@ -132,6 +132,11 @@ Full checklist: [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 - **v0.2 — finger swipes.** 3/4-finger → switch workspace. Held back because a
   runtime `hl.gesture` can't be cleanly un-registered yet.
+- **Per-device overrides.** Today the panel writes the global
+  `input:touchpad:*` section, so settings apply to every touchpad at once. A
+  device picker would write a Hyprland `device` block (`hl.device{…}` /
+  `device[<name>]`) instead — e.g. natural scroll on the laptop pad but not on
+  a plugged-in Magic Trackpad.
 - **Haptics.** Apple Magic Trackpad Taptic Engine strength (Off / Low / Medium
   / High) and click recovery — see `bin/magic-haptic` and `setup.sh`.
 - **Custom gestures.** Finger-count buttons, force-press, corner taps via an
