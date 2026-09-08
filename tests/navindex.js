@@ -5,11 +5,10 @@
 // KEEP IN SYNC with BarWidget.qml `navItems`. The e2e suite exercises the
 // real panel, so a drift here shows up as an e2e failure.
 //
-//   node tests/navindex.js <hasScopeRow 0|1> <kind> [key]
-//     kind: scope | toggle | enum | scroll | pointer | reset
-//     key:  a TOUCHPAD_TOGGLES key (for kind=toggle) or an ENUM_SETTINGS key
-//           (for kind=enum)
-//   prints the 0-based index, or -1 if not present.
+//   node tests/navindex.js <hasScopeRow 0|1> <deviceScope 0|1> <kind> [key]
+//     kind: scope | toggle | enum | scroll | pointer | disable | reset | count
+//     key:  a TOUCHPAD_TOGGLES key (kind=toggle) or ENUM_SETTINGS key (kind=enum)
+//   prints the 0-based index (or the item count for kind=count), -1 if absent.
 
 const M = require("../Model.js")
 
@@ -17,22 +16,32 @@ function enumsInSection(section) {
   return M.ENUM_SETTINGS.filter(function (e) { return e.section === section })
 }
 
-function navItems(hasScope, deviceOverrides) {
+// deviceScope: the panel is scoped to a device (adds "disable").
+// deviceOverrides: that device has overrides (adds "reset").
+// disabled: that device is turned off (only scope/disable/reset are navigable).
+function navItems(hasScope, deviceScope, deviceOverrides, disabled) {
   const items = []
   if (hasScope) items.push({ kind: "scope" })
+  if (deviceScope && disabled) {
+    items.push({ kind: "disable" })
+    items.push({ kind: "reset" })
+    return items
+  }
   for (const t of M.TOUCHPAD_TOGGLES) items.push({ kind: "toggle", key: t.key })
   for (const e of enumsInSection("touchpad")) items.push({ kind: "enum", setting: e.key })
   items.push({ kind: "scroll" })
   for (const e of enumsInSection("scroll")) items.push({ kind: "enum", setting: e.key })
   items.push({ kind: "pointer" })
   for (const e of enumsInSection("pointer")) items.push({ kind: "enum", setting: e.key })
-  if (deviceOverrides) items.push({ kind: "reset" })
+  if (deviceScope) items.push({ kind: "disable" })
+  if (deviceScope && deviceOverrides) items.push({ kind: "reset" })
   return items
 }
 
 if (require.main === module) {
-  const [hasScope, kind, key] = process.argv.slice(2)
-  const items = navItems(hasScope === "1", false)
+  // node navindex.js <hasScope> <deviceScope> <hasOverrides> <kind> [key]
+  const [hasScope, deviceScope, hasOverrides, kind, key] = process.argv.slice(2)
+  const items = navItems(hasScope === "1", deviceScope === "1", hasOverrides === "1", false)
   if (kind === "count") {
     process.stdout.write(String(items.length))
   } else {

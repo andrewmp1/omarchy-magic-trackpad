@@ -257,6 +257,39 @@ test("applyPlan: nothing set -> empty plan; stale gestures produce nothing", () 
   assert.equal(M.GESTURES.length, 0)
 })
 
+test('"disable this touchpad": enabled:false short-circuits everything for that device', () => {
+  const cfg = {
+    version: 2,
+    global: { touchpad: { tapToClick: true } },
+    devices: {
+      "logitech-m720": { touchpad: { naturalScroll: true }, scrollSpeed: "fast", enabled: false }
+    }
+  }
+  assert.equal(M.deviceDisabled(cfg, "logitech-m720"), true)
+  assert.equal(M.deviceDisabled(cfg, "apple-inc.-magic-trackpad"), false)
+  assert.equal(M.deviceDisabled(cfg, "global"), false)
+
+  const plan = M.applyPlan(cfg)
+  assert.equal(plan.length, 2)
+  assert.ok(plan[0][2].startsWith("hl.config(")) // global still applies
+  assert.equal(plan[1][2], 'hl.device({ name = "logitech-m720", enabled = false })') // nothing else
+
+  const lua = M.generateLua(cfg)
+  assert.ok(lua.includes('pcall(function() hl.device({ name = "logitech-m720", enabled = false }) end)'))
+  assert.ok(!lua.includes("natural_scroll")) // the disabled pad's other keys are dropped
+
+  // it's the only "override" that counts, and Reset re-enables
+  assert.equal(M.deviceOverrideCount(cfg, "logitech-m720"), 1)
+  const reset = M.resetDeviceEvalArgs(cfg, {}, "logitech-m720")
+  assert.ok(reset[2].includes("enabled = true"))
+
+  // normalizeConfig keeps enabled:false, rejects other truthy values
+  const n = M.normalizeConfig({ version: 2, global: { touchpad: {} }, devices: { "logitech-m720": { touchpad: {}, enabled: "off" } } })
+  assert.equal(n.devices["logitech-m720"].enabled, null) // "off" is not false
+  const n2 = M.normalizeConfig({ version: 2, global: { touchpad: {} }, devices: { "logitech-m720": { touchpad: {}, enabled: false } } })
+  assert.equal(n2.devices["logitech-m720"].enabled, false)
+})
+
 test("applyPlan: pointer speed + accel profile — global one eval (two levels), device flat", () => {
   const plan = M.applyPlan({
     version: 2,

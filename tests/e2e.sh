@@ -55,14 +55,19 @@ BASE="$(scope_row_count)"          # 0 or 1 — nav offset to the first toggle r
 DEV="$(FIRST_DEVICE)"
 say "scope row present: $BASE   first touchpad: ${DEV:-<none>}"
 
-# Keyboard-cursor index of a row, computed from Model.js so adding rows never
-# breaks the nav math (see tests/navindex.js).
+# Keyboard-cursor indices, computed from Model.js so adding rows never breaks
+# the nav math (see tests/navindex.js). Args: <deviceScope 0|1> <hasOverrides
+# 0|1> <kind> [key].
 navidx() { node "$REPO/tests/navindex.js" "$BASE" "$@"; }
-IDX_TAP="$(navidx toggle tapToClick)"
-IDX_NATURAL="$(navidx toggle naturalScroll)"
-IDX_SCROLL="$(navidx scroll)"
-IDX_POINTER="$(navidx pointer)"
-say "nav indices: tap=$IDX_TAP natural=$IDX_NATURAL scroll=$IDX_SCROLL pointer=$IDX_POINTER"
+G_TOTAL="$(navidx 0 0 count)"                 # global scope item count
+IDX_TAP="$(navidx 0 0 toggle tapToClick)"
+IDX_NATURAL="$(navidx 0 0 toggle naturalScroll)"
+IDX_SCROLL="$(navidx 0 0 scroll)"
+IDX_POINTER="$(navidx 0 0 pointer)"
+D_TOTAL="$(navidx 1 0 count)"                 # device scope, no overrides yet
+D_IDX_NATURAL="$(navidx 1 0 toggle naturalScroll)"
+D_IDX_DISABLE="$(navidx 1 0 disable)"
+say "nav indices: tap=$IDX_TAP natural=$IDX_NATURAL scroll=$IDX_SCROLL pointer=$IDX_POINTER  |  dev: natural=$D_IDX_NATURAL disable=$D_IDX_DISABLE"
 
 # NB: `.bool // empty` is wrong — jq treats `false` as absent, so a toggle
 # flipping to false would read as "unchanged". Emit the literal instead.
@@ -96,20 +101,25 @@ open_panel() {
   [ "$ok" = 1 ] || return 1
   sleep 1.2
   press Down          # prime: cursor -> active, index 0
+  CUR=0
   return 0
 }
-# The cursor list wraps, so reach a target index by whichever direction is
-# shorter — a long one-way run of `wtype` keystrokes is where the panel drops
-# focus or loses a press.
-NAV_TOTAL="$(navidx count)"
+# Move the wrapping panel cursor from $CUR to index $1 the short way round.
+# $2 is the item count for the current scope (defaults to the global count).
+# Steps that reset the panel's own cursorIndex to 0 (scope switch, disable,
+# re-enable, reset) must set `CUR=0` afterwards — activate() can't know.
+CUR=0
 nav() {
-  local target="$1" n up
-  up=$(( NAV_TOTAL - target ))
-  if [ "$target" -le "$up" ]; then
-    n="$target"; while [ "$n" -gt 0 ]; do press Down; n=$((n - 1)); done
+  local target="$1" total="${2:-$G_TOTAL}" delta fwd
+  delta=$(( ( (target - CUR) % total + total ) % total ))
+  fwd=$delta
+  if [ "$fwd" -le $(( total - fwd )) ]; then
+    while [ "$fwd" -gt 0 ]; do press Down; fwd=$((fwd - 1)); done
   else
-    n="$up";     while [ "$n" -gt 0 ]; do press Up;   n=$((n - 1)); done
+    delta=$(( total - fwd ))
+    while [ "$delta" -gt 0 ]; do press Up; delta=$((delta - 1)); done
   fi
+  CUR="$target"
 }
 activate() { press space; sleep 0.6; }
 
@@ -131,9 +141,10 @@ restore() {
   done
   [ -n "${ORIG[scroll_factor]}" ] && setf scroll_factor "${ORIG[scroll_factor]}"
   hyprctl eval "hl.config({ input = { sensitivity = ${ORIG[sensitivity]:-0}, accel_profile = \"${ORIG[accel_profile]}\", scroll_method = \"${ORIG[scroll_method]}\" } })" >/dev/null 2>&1
-  # Pin any device we touched back to the original global values.
+  # Pin any device we touched back to the original global values, and make
+  # sure we never leave a touchpad turned off.
   if [ -n "$DEV" ]; then
-    hyprctl eval "hl.device({ name = \"$DEV\", natural_scroll = ${ORIG[natural_scroll]:-false}, scroll_factor = ${ORIG[scroll_factor]:-0.4} })" >/dev/null 2>&1
+    hyprctl eval "hl.device({ name = \"$DEV\", enabled = true, natural_scroll = ${ORIG[natural_scroll]:-false}, scroll_factor = ${ORIG[scroll_factor]:-0.4} })" >/dev/null 2>&1
   fi
   if [ "$HAD_CFG" -eq 1 ]; then mv "$CFG.e2ebak" "$CFG"; else rm -f "$CFG"; fi
   rm -f "$LUA"
@@ -216,38 +227,52 @@ if [ -f "$LUA" ] && grep -q "hl.config" "$LUA"; then
     || { say "setting lost after reload ($keep -> $now)"; fail=1; }
 fi
 
-# --- test 5: per-device scope — pick a device, override a toggle ----------
+# --- tests 5 + 6: per-device scope, one continuous panel session --------
+# (Reopening the panel for each sub-step made the first scope-switch
+# keystroke flaky; keep it open and chain the steps.)
 if [ "$BASE" = "1" ] && [ -n "$DEV" ]; then
   rm -f "$CFG" "$LUA"
   open_panel
-  sleep 0.8                             # let the panel-open device refresh settle first
-  activate                              # cursor at index 0 = SCOPE row -> cycleScope() -> the device
+  sleep 0.8                                   # panel-open device refresh settles
+  activate; CUR=0                              # SCOPE row -> cycleScope() -> the device (cursorIndex reset)
   sleep 0.8
-  nav "$IDX_NATURAL"; activate            # -> natural scroll row, in the DEVICE scope
+
+  # test 5: override a toggle in the device scope
+  nav "$D_IDX_NATURAL" "$D_TOTAL"; activate    # -> natural scroll -> setToggle (device)
   sleep 0.8
-  close_panel
-  ok5=1
-  if [ ! -f "$CFG" ]; then
-    say "device scope: magic-trackpad.json not written"; fail=1; ok5=0
+  dk="$(jq -r --arg d "$DEV" '.devices[$d].touchpad.naturalScroll' "$CFG" 2>/dev/null)"
+  { [ "$dk" = "true" ] || [ "$dk" = "false" ]; } \
+    && say "device override in JSON: devices[\"$DEV\"].touchpad.naturalScroll = $dk  ok" \
+    || { say "device override missing from JSON (got: ${dk:-none})"; fail=1; }
+  grep -q "hl.device(" "$LUA" 2>/dev/null \
+    && say "managed .lua gained an hl.device() block: ok" \
+    || { say "managed .lua has no hl.device() block"; fail=1; }
+
+  # test 6: disable this touchpad (device now has 1 override -> reset row too)
+  d1_disable="$(navidx 1 1 disable)"; d1_total="$(navidx 1 1 count)"
+  nav "$d1_disable" "$d1_total"; activate      # -> "Disable this touchpad" -> confirm dialog
+  sleep 0.4
+  press Right; activate; CUR=0                 # dialog: Keep on -> Turn off -> confirm (cursorIndex reset)
+  sleep 0.6
+  de="$(jq -r --arg d "$DEV" '.devices[$d].enabled' "$CFG" 2>/dev/null)"
+  if [ "$de" = "false" ] && grep -q "enabled = false" "$LUA" 2>/dev/null; then
+    say "disable touchpad: devices[\"$DEV\"].enabled = false + hl.device({..., enabled = false})  ok"
   else
-    dk="$(jq -r --arg d "$DEV" '.devices[$d].touchpad.naturalScroll' "$CFG" 2>/dev/null)"
-    [ "$dk" = "true" ] || [ "$dk" = "false" ] \
-      && say "device override in JSON: devices[\"$DEV\"].touchpad.naturalScroll = $dk  ok" \
-      || { say "device override missing from JSON (got: ${dk:-none})"; fail=1; ok5=0; }
-  fi
-  if [ -f "$LUA" ] && grep -q "hl.device(" "$LUA"; then
-    say "managed .lua gained an hl.device() block: ok"
-  else
-    say "managed .lua has no hl.device() block after a device change"; fail=1; ok5=0
-  fi
-  if [ "$ok5" = 1 ]; then
-    say "per-device scope e2e: ok"
-  else
+    say "disable touchpad did not take (enabled=$de)"; fail=1
     say "---- CFG ----"; sed 's/^/    /' "$CFG" 2>/dev/null || say "    (no CFG)"
-    say "---- LUA ----"; sed 's/^/    /' "$LUA" 2>/dev/null || say "    (no LUA)"
   fi
+
+  # re-enable: a disabled scope's navItems is [scope, disable, reset] (count 3)
+  nav 1 3; activate; CUR=0                     # scope(0) -> disable(1) -> doEnable() (no confirm)
+  sleep 0.6
+  close_panel
+  re="$(jq -r --arg d "$DEV" '.devices[$d].enabled // "gone"' "$CFG" 2>/dev/null)"
+  { [ "$re" = "gone" ] || [ "$re" = "null" ]; } \
+    && say "re-enable: the disable override is cleared  ok" \
+    || { say "re-enable left enabled=$re"; fail=1; }
+  hyprctl eval "hl.device({ name = \"$DEV\", enabled = true })" >/dev/null 2>&1
 else
-  say "test 5 skipped: no touchpad detected on this box"
+  say "tests 5/6 skipped: no touchpad detected on this box"
 fi
 
 [ "$fail" -eq 0 ] && say "E2E OK" || say "E2E FAILED"

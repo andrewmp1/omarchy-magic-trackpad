@@ -157,7 +157,10 @@ function deviceLabel(name) {
 // ---------------------------------------------------------------- document
 
 function emptyEntry() {
-  var e = { touchpad: {}, scrollSpeed: null, pointerSpeed: null }
+  // `enabled` is device-scope only: null = the pad works normally, false =
+  // the plugin has turned it off (hl.device({ enabled = false })). Global
+  // entries carry the key but never set it.
+  var e = { touchpad: {}, scrollSpeed: null, pointerSpeed: null, enabled: null }
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) e.touchpad[TOUCHPAD_TOGGLES[i].key] = null
   for (var j = 0; j < ENUM_SETTINGS.length; j++) e[ENUM_SETTINGS[j].key] = null
   return e
@@ -201,6 +204,7 @@ function normalizeEntry(e) {
     ? src.scrollSpeed : null
   out.pointerSpeed = POINTER_STOPS.some(function (s) { return s.key === src.pointerSpeed })
     ? src.pointerSpeed : null
+  out.enabled = (src.enabled === false) ? false : null
   for (var j = 0; j < ENUM_SETTINGS.length; j++) {
     var es = ENUM_SETTINGS[j]
     out[es.key] = es.values.some(function (v) { return v.key === src[es.key] })
@@ -333,6 +337,13 @@ function deviceToggleEvalArgs(name, field, value) {
   return deviceEvalArgs(name, a)
 }
 
+// A device scope the plugin has turned off.
+function deviceDisabled(cfg, name) {
+  if (!name || name === GLOBAL) return false
+  var e = normalizeConfig(cfg).devices[name]
+  return !!(e && e.enabled === false)
+}
+
 // "Reset to global": a runtime `hl.device` that pins every field of `name`
 // back to what the global scope currently resolves to. The plugin drops the
 // device from its document at the same time, so the block disappears from the
@@ -353,6 +364,7 @@ function resetDeviceEvalArgs(cfg, live, name) {
     var lv = enumValue(es.key, effectiveEnum(cfg, live, GLOBAL, es.key))
     if (lv !== null) assign[es.field] = lv
   }
+  assign.enabled = true   // clears a previous "disable this touchpad"
   return deviceEvalArgs(name, assign)
 }
 
@@ -394,6 +406,10 @@ function applyPlan(cfg) {
 
   for (var name in c.devices) {
     if (!isDeviceName(name)) continue
+    if (c.devices[name].enabled === false) {
+      plan.push(deviceEvalArgs(name, { enabled: false }))
+      continue                                  // a disabled pad needs nothing else
+    }
     var d = entryAssign(c.devices[name])
     if (assignCount(d) > 0) plan.push(deviceEvalArgs(name, _merge(d.input, d.touchpad)))
   }
@@ -434,6 +450,10 @@ function generateLua(cfg) {
 
   for (var name in c.devices) {
     if (!isDeviceName(name)) continue
+    if (c.devices[name].enabled === false) {
+      out.push("pcall(function() " + deviceLua(name, { enabled: false }) + " end)")
+      continue
+    }
     var d = entryAssign(c.devices[name])
     if (assignCount(d) > 0) out.push("pcall(function() " + deviceLua(name, _merge(d.input, d.touchpad)) + " end)")
   }
@@ -535,6 +555,7 @@ function deviceOverrideCount(cfg, scope) {
   if (!scope || scope === GLOBAL) return 0
   var e = normalizeConfig(cfg).devices[scope]
   if (!e) return 0
+  if (e.enabled === false) return 1   // "disabled" is the only override that matters
   var n = 0
   for (var i = 0; i < TOUCHPAD_TOGGLES.length; i++) {
     var v = e.touchpad[TOUCHPAD_TOGGLES[i].key]
@@ -549,6 +570,7 @@ function deviceOverrideCount(cfg, scope) {
 // Back-compatible: summaryLine(cfg) means the global scope.
 function summaryLine(cfg, scope) {
   var s = scope || GLOBAL
+  if (deviceDisabled(cfg, s)) return "disabled"
   var e = scopeEntry(cfg, s)
   var bits = []
   if (e.touchpad.tapToClick) bits.push("tap")
@@ -646,6 +668,7 @@ if (typeof module !== "undefined") {
     deviceLua: deviceLua,
     deviceEvalArgs: deviceEvalArgs,
     deviceToggleEvalArgs: deviceToggleEvalArgs,
+    deviceDisabled: deviceDisabled,
     resetDeviceEvalArgs: resetDeviceEvalArgs,
     applyPlan: applyPlan,
     needsLoader: needsLoader,

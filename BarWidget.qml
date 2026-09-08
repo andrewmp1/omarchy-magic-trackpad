@@ -32,6 +32,9 @@ Panel {
   property string scope: Model.GLOBAL
   // Reset-to-global confirmation is showing.
   property bool resetPending: false
+  // Disable-this-touchpad confirmation is showing.
+  property bool disablePending: false
+  readonly property bool anyDialog: resetPending || disablePending
 
   // Global + one entry per detected touchpad. Labels are pre-stripped and
   // length-capped in Model.deviceLabel — they land in host-owned sinks
@@ -52,6 +55,8 @@ Panel {
   }
   readonly property bool scopeDropdownOpen:
     scopePicker.item && ("popupOpen" in scopePicker.item) && scopePicker.item.popupOpen
+  // The selected device has been turned off — its settings rows are inert.
+  readonly property bool scopeDisabled: scopeIsDevice && Model.deviceDisabled(cfg, scope)
 
   // Enum settings grouped by the panel section they render in.
   function enumsInSection(section) {
@@ -69,6 +74,12 @@ Panel {
     var items = []
     var i
     if (scopeOptions.length > 1) items.push({ kind: "scope" })
+    // A disabled device scope: only "enable" and "reset" are meaningful.
+    if (scopeDisabled) {
+      items.push({ kind: "disable" })
+      items.push({ kind: "reset" })
+      return items
+    }
     for (i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++) {
       var t = Model.TOUCHPAD_TOGGLES[i]
       items.push({ kind: "toggle", key: t.key, field: t.field, label: t.label })
@@ -81,6 +92,7 @@ Panel {
     items.push({ kind: "pointer" })
     var ptEnums = enumsInSection("pointer")
     for (i = 0; i < ptEnums.length; i++) items.push({ kind: "enum", setting: ptEnums[i].key })
+    if (scopeIsDevice) items.push({ kind: "disable" })
     if (scopeIsDevice && Model.deviceOverrideCount(cfg, scope) > 0) items.push({ kind: "reset" })
     return items
   }
@@ -103,10 +115,8 @@ Panel {
   }
 
   function moveCursor(delta) {
-    if (resetPending) {
-      resetConfirm.selectedIndex = resetConfirm.selectedIndex === 0 ? 1 : 0
-      return
-    }
+    if (resetPending) { resetConfirm.selectedIndex = resetConfirm.selectedIndex === 0 ? 1 : 0; return }
+    if (disablePending) { disableConfirm.selectedIndex = disableConfirm.selectedIndex === 0 ? 1 : 0; return }
     if (!cursorActive) { cursorActive = true; return }
     var n = navItems.length
     cursorIndex = ((cursorIndex + delta) % n + n) % n
@@ -116,6 +126,11 @@ Panel {
     if (resetPending) {
       if (resetConfirm.selectedIndex === 1) doResetToGlobal()
       else resetPending = false
+      return
+    }
+    if (disablePending) {
+      if (disableConfirm.selectedIndex === 1) doDisable()
+      else disablePending = false
       return
     }
     if (!cursorActive) { cursorActive = true; return }
@@ -132,6 +147,8 @@ Panel {
       cyclePointer()
     } else if (item.kind === "enum") {
       cycleEnum(item.setting)
+    } else if (item.kind === "disable") {
+      setDisabled(!scopeDisabled)
     } else if (item.kind === "reset") {
       resetConfirm.selectedIndex = 1
       resetPending = true
@@ -297,6 +314,53 @@ Panel {
     flash("Reset to global")
   }
 
+  // ---- disable / re-enable a device ----
+
+  function setDisabled(value) {
+    var sc = scope
+    if (sc === Model.GLOBAL) return
+    if (value) {
+      // Turning a pad OFF is destructive — confirm first (default: Keep on).
+      disableConfirm.selectedIndex = 0
+      disablePending = true
+      return
+    }
+    doEnable()
+  }
+
+  function doEnable() {
+    var sc = scope
+    if (sc === Model.GLOBAL) return
+    store.mutate(function (d) {
+      if (!d.devices || !d.devices[sc]) return
+      delete d.devices[sc].enabled
+      // If the pad had no other overrides, drop the entry so it inherits
+      // Global cleanly (same end state as "Reset to Global").
+      var e = d.devices[sc], bare = !(e.scrollSpeed || e.pointerSpeed)
+      var k, i
+      for (k in (e.touchpad || {})) if (e.touchpad[k] === true || e.touchpad[k] === false) bare = false
+      for (i = 0; i < Model.ENUM_SETTINGS.length; i++) if (e[Model.ENUM_SETTINGS[i].key]) bare = false
+      if (bare) delete d.devices[sc]
+    })
+    var a = Model.deviceToggleEvalArgs(sc, "enabled", true)
+    if (a) sync.runOne(a)
+    sync.writeManaged(store.config)
+    cursorIndex = 0
+    flash("Enabled")
+  }
+
+  function doDisable() {
+    var sc = scope
+    disablePending = false
+    if (sc === Model.GLOBAL) return
+    store.mutate(function (d) { root._entryFor(d, sc).enabled = false })
+    var a = Model.deviceToggleEvalArgs(sc, "enabled", false)
+    if (a) sync.runOne(a)
+    sync.writeManaged(store.config)
+    cursorIndex = 0
+    flash("Disabled")
+  }
+
   function flash(text) {
     notice = text
     noticeTimer.restart()
@@ -397,6 +461,7 @@ Panel {
       onActivateRequested: root.activateCursor()
       onCloseRequested: {
         if (root.resetPending) { root.resetPending = false; return }
+        if (root.disablePending) { root.disablePending = false; return }
         root.close()
       }
       onTabRequested: function (direction) { root.switchPanel(direction) }
@@ -528,6 +593,14 @@ Panel {
 
           PanelSeparator { visible: root.scopeOptions.length > 1; foreground: root.fg }
 
+          // ---- settings sections (inert while this device scope is off) ----
+          Column {
+            id: settingsBlock
+            width: parent.width
+            spacing: Style.space(12)
+            enabled: !root.scopeDisabled
+            opacity: root.scopeDisabled ? 0.35 : 1.0
+
           // ---- touchpad toggles ----
           PanelSectionHeader { text: "TOUCHPAD"; foreground: root.fg; fontFamily: root.fontFamily }
 
@@ -647,6 +720,29 @@ Panel {
             }
           }
 
+          } // settingsBlock
+
+          // ---- disable this touchpad (device scope only) ----
+          Toggle {
+            id: disableToggle
+            width: parent.width
+            visible: root.scopeIsDevice
+            label: "Disable this touchpad"
+            description: root.scopeDisabled
+              ? (root.scopeLabel + " is turned off — it will not respond until re-enabled here")
+              : "Turn " + root.scopeLabel + " off entirely"
+            foreground: root.scopeDisabled ? Color.urgent : root.fg
+            accent: Color.urgent
+            fontFamily: root.fontFamily
+            checked: root.scopeDisabled
+            hasCursor: root.cursorIs("disable")
+            onHasCursorChanged: if (hasCursor) root.ensureCursorVisible(this)
+            onClicked: root.setDisabled(!root.scopeDisabled)
+            onHovered: function (h) {
+              if (h) { root.cursorActive = true; root.setCursorToKind("disable") }
+            }
+          }
+
           // ---- reset to global (device scope with overrides) ----
           Button {
             id: resetButton
@@ -697,6 +793,23 @@ Panel {
         fontFamily: root.fontFamily
         onCanceled: root.resetPending = false
         onConfirmed: root.doResetToGlobal()
+      }
+
+      // Disable-this-touchpad confirmation. Same semantic-key wiring; defaults
+      // to Keep-on because turning off the pad you may be using strands you.
+      ConfirmDialog {
+        id: disableConfirm
+        anchors.fill: parent
+        z: 51
+        opened: root.disablePending
+        message: "Turn off " + root.scopeLabel + "? It stops responding until you re-enable it here or remove the plugin — don't do this to the only pointer you have."
+        confirmText: "Turn off"
+        cancelText: "Keep on"
+        background: root.bar ? root.bar.background : Color.background
+        foreground: root.fg
+        fontFamily: root.fontFamily
+        onCanceled: root.disablePending = false
+        onConfirmed: root.doDisable()
       }
     }
   }
