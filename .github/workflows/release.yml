@@ -66,10 +66,15 @@ jobs:
         if: ${{ inputs.dry_run == false }}
         env:
           GH_TOKEN: ${{ github.token }}
+          # Notes travel via the environment, not ${{ }} interpolation: the
+          # runner injects env values without shell interpretation, so
+          # backticks/quotes in the CHANGELOG markdown cannot execute.
+          NOTES: ${{ steps.prep.outputs.notes }}
         run: |
           v="v${{ inputs.version }}"
           git archive --format=tar.gz --prefix="omarchy-magic-trackpad-$v/" -o "/tmp/$v.tar.gz" "$v"
+          printf '%s\n' "$NOTES" > /tmp/notes.md
           gh release create "$v" \
             --title "$v" \
-            --notes "${{ steps.prep.outputs.notes }}" \
+            --notes-file /tmp/notes.md \
             "/tmp/$v.tar.gz#Source (tar.gz)"
