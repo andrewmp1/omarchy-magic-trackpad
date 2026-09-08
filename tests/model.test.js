@@ -250,6 +250,30 @@ test("applyPlan: device override only (global untouched) -> one hl.device", () =
   assert.ok(plan[0][2].startsWith('hl.device({ name = "logitech-m720"'))
 })
 
+test("applyPlanForDevice: just the one device's commands (for a reconnect)", () => {
+  const cfg = {
+    version: 2,
+    global: { touchpad: { tapToClick: true }, scrollSpeed: "fast" },
+    devices: {
+      "logitech-m720": { touchpad: { naturalScroll: false }, pointerSpeed: "slow" },
+      "apple-inc.-magic-trackpad": { touchpad: {}, enabled: false },
+      "synps2-synaptics-touchpad": { touchpad: {} }        // no overrides
+    }
+  }
+  const a = M.applyPlanForDevice(cfg, "logitech-m720")
+  assert.equal(a.length, 1)
+  assert.ok(a[0][2].startsWith('hl.device({ name = "logitech-m720", '))
+  assert.ok(a[0][2].includes("natural_scroll = false"))
+  assert.ok(a[0][2].includes("sensitivity = -0.3"))
+  assert.ok(!a[0][2].includes("tap_to_click"))            // global keys are not pushed
+
+  assert.deepEqual(M.applyPlanForDevice(cfg, "apple-inc.-magic-trackpad"),
+    [["hyprctl", "eval", 'hl.device({ name = "apple-inc.-magic-trackpad", enabled = false })']])
+  assert.deepEqual(M.applyPlanForDevice(cfg, "synps2-synaptics-touchpad"), [])
+  assert.deepEqual(M.applyPlanForDevice(cfg, "never-configured"), [])
+  assert.deepEqual(M.applyPlanForDevice(cfg, "../bad"), [])
+})
+
 test("applyPlan: nothing set -> empty plan; stale gestures produce nothing", () => {
   assert.equal(M.applyPlan(M.defaultConfig()).length, 0)
   assert.equal(M.applyPlan({}).length, 0)

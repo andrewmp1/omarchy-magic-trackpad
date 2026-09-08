@@ -182,15 +182,31 @@ Panel {
   }
 
   // A detached touchpad drops back to Global.
+  // Names of touchpads seen in the previous device-list refresh, so a
+  // (re)connect can be told apart from "still here".
+  property var _prevDevices: []
+
   Connections {
     target: sync
     function onTouchpadDevicesChanged() {
-      if (root.scope === Model.GLOBAL) return
-      var devs = sync.touchpadDevices || []
-      for (var i = 0; i < devs.length; i++) {
-        if (devs[i].name === root.scope) { sync.probeBattery(root.scope); return }
+      var names = (sync.touchpadDevices || []).map(function (d) { return d.name })
+      var prev = root._prevDevices
+      root._prevDevices = names
+
+      // A configured pad that is present now but wasn't before has just
+      // (re)connected — re-push its overrides. Hyprland re-applies stored
+      // `device[]` rules on connect, but a runtime `hl.device` from earlier
+      // this session may not survive an unplug/replug until `hyprctl reload`.
+      for (var i = 0; i < names.length; i++) {
+        if (prev.indexOf(names[i]) !== -1) continue
+        if (!root.cfg.devices || !root.cfg.devices[names[i]]) continue
+        var argv = Model.applyPlanForDevice(root.cfg, names[i])
+        for (var j = 0; j < argv.length; j++) sync.runOne(argv[j])
       }
-      root.scope = Model.GLOBAL
+
+      if (root.scope === Model.GLOBAL) return
+      if (names.indexOf(root.scope) !== -1) { sync.probeBattery(root.scope); return }
+      root.scope = Model.GLOBAL   // the selected pad went away
       root.cursorIndex = 0
     }
   }

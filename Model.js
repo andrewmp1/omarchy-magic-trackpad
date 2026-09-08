@@ -416,6 +416,18 @@ function applyPlan(cfg) {
   return plan
 }
 
+// The apply commands for ONE device — used to re-push a device's overrides
+// when it (re)connects mid-session, without a full `hyprctl reload`.
+function applyPlanForDevice(cfg, slug) {
+  if (!isDeviceName(slug)) return []
+  var e = normalizeConfig(cfg).devices[slug]
+  if (!e) return []
+  if (e.enabled === false) return [deviceEvalArgs(slug, { enabled: false })]
+  var d = entryAssign(e)
+  if (assignCount(d) === 0) return []
+  return [deviceEvalArgs(slug, _merge(d.input, d.touchpad))]
+}
+
 // ---------------------------------------------------------------- persistence
 
 var LOADER_MARK = "omarchy-magic-trackpad"
@@ -730,6 +742,7 @@ if (typeof module !== "undefined") {
     deviceDisabled: deviceDisabled,
     resetDeviceEvalArgs: resetDeviceEvalArgs,
     applyPlan: applyPlan,
+    applyPlanForDevice: applyPlanForDevice,
     needsLoader: needsLoader,
     withLoader: withLoader,
     generateLua: generateLua,
