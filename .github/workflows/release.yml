@@ -1,0 +1,75 @@
+name: release
+
+# Manual trigger. Bumps the version in manifest.json / package.json, rolls
+# CHANGELOG.md's [Unreleased] into a dated section, commits, tags v<version>,
+# pushes to main, and creates the GitHub Release (notes from the CHANGELOG,
+# with a source tarball attached).
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 0.2.0 (no leading v)"
+        required: true
+        type: string
+      dry_run:
+        description: "Show the diff and notes, change nothing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Lua (for the generated-config syntax test)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lua5.4
+          sudo ln -sf "$(command -v luac5.4)" /usr/local/bin/luac
+
+      - name: Gate — portable test layers must pass
+        run: node --test tests/model.test.js tests/manifest.test.js tests/lua.test.js
+
+      - name: Prepare release (bump + changelog + commit + tag)
+        id: prep
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          FLAG=""
+          [ "${{ inputs.dry_run }}" = "true" ] && FLAG="--dry-run"
+          notes="$(bash scripts/release.sh "${{ inputs.version }}" $FLAG)"
+          {
+            echo "notes<<__EOF__"
+            printf '%s\n' "$notes"
+            echo "__EOF__"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push commit + tag
+        if: ${{ inputs.dry_run == false }}
+        run: git push origin HEAD --follow-tags
+
+      - name: Create GitHub Release
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v="v${{ inputs.version }}"
+          git archive --format=tar.gz --prefix="omarchy-magic-trackpad-$v/" -o "/tmp/$v.tar.gz" "$v"
+          gh release create "$v" \
+            --title "$v" \
+            --notes "${{ steps.prep.outputs.notes }}" \
+            "/tmp/$v.tar.gz#Source (tar.gz)"
