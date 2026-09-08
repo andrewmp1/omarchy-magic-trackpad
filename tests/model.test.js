@@ -518,7 +518,8 @@ const PROC_INPUT = [
   '',
   'I: Bus=0005 Vendor=05ac Product=030e Version=0100',
   'N: Name="Apple Inc. Magic Trackpad"',
-  'P: Phys=00:1f:20:5e:8a:1c',
+  'P: Phys=28:f0:76:56:af:03',
+  'U: Uniq=64:5a:ed:ef:e5:8f',
   'B: PROP=5',
   'B: EV=1b',
   'B: ABS=260800000000000',
@@ -548,4 +549,36 @@ test("touchpadDevices tolerates broken input", () => {
   assert.deepEqual(M.touchpadDevices("", ""), [])
   assert.deepEqual(M.touchpadDevices("not json", null), [])
   assert.deepEqual(M.touchpadDevices(JSON.stringify({ mice: [{ name: "bad name!" }] }), PROC_INPUT), [])
+})
+
+test("deviceUniq / deviceTransport read a pad's /proc block", () => {
+  assert.equal(M.deviceUniq(PROC_INPUT, "apple-inc.-magic-trackpad"), "64:5a:ed:ef:e5:8f")
+  assert.equal(M.deviceTransport(PROC_INPUT, "apple-inc.-magic-trackpad"), "Bluetooth")
+  assert.equal(M.deviceTransport(PROC_INPUT, "logitech-usb-receiver"), "USB")
+  assert.equal(M.deviceUniq(PROC_INPUT, "logitech-usb-receiver"), "")     // no U: Uniq line
+  assert.equal(M.deviceUniq(PROC_INPUT, "never-seen"), "")
+  assert.equal(M.deviceUniq("garbage", "apple-inc.-magic-trackpad"), "")
+  assert.equal(M.deviceUniq(PROC_INPUT, "../etc"), "")                    // bad slug
+})
+
+test("batteryFromUevent parses capacity + status, rejects junk", () => {
+  const ue = [
+    "POWER_SUPPLY_NAME=hid-64:5a:ed:ef:e5:8f-battery-144",
+    "POWER_SUPPLY_TYPE=Battery",
+    "POWER_SUPPLY_CAPACITY=70",
+    "POWER_SUPPLY_STATUS=Discharging",
+    "POWER_SUPPLY_MODEL_NAME=Someone's <script>Trackpad"
+  ].join("\n")
+  assert.deepEqual(M.batteryFromUevent(ue), { capacity: 70, status: "Discharging" })
+  assert.deepEqual(M.batteryFromUevent(""), { capacity: -1, status: "" })
+  assert.deepEqual(M.batteryFromUevent("POWER_SUPPLY_CAPACITY=999\nPOWER_SUPPLY_STATUS=x".padEnd(400, "y")),
+    { capacity: -1, status: "" })
+})
+
+test("isPowerSupplyName is an anchored allow-list", () => {
+  assert.equal(M.isPowerSupplyName("hid-64:5a:ed:ef:e5:8f-battery-144"), true)
+  assert.equal(M.isPowerSupplyName("BAT0"), true)
+  assert.equal(M.isPowerSupplyName("../../etc/shadow"), false)
+  assert.equal(M.isPowerSupplyName("a b"), false)
+  assert.equal(M.isPowerSupplyName("x".repeat(65)), false)
 })

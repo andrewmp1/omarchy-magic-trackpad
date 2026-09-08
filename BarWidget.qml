@@ -173,6 +173,7 @@ Panel {
     scope = v
     cursorActive = true
     cursorIndex = 0
+    if (v !== Model.GLOBAL) sync.probeBattery(v)
   }
 
   function scopeIndex() {
@@ -186,7 +187,9 @@ Panel {
     function onTouchpadDevicesChanged() {
       if (root.scope === Model.GLOBAL) return
       var devs = sync.touchpadDevices || []
-      for (var i = 0; i < devs.length; i++) if (devs[i].name === root.scope) return
+      for (var i = 0; i < devs.length; i++) {
+        if (devs[i].name === root.scope) { sync.probeBattery(root.scope); return }
+      }
       root.scope = Model.GLOBAL
       root.cursorIndex = 0
     }
@@ -519,7 +522,12 @@ Panel {
                 text: {
                   if (root.notice !== "") return root.notice
                   var s = Model.summaryLine(root.cfg, root.scope).toUpperCase()
-                  return root.scopeIsDevice ? (root.scopeLabel.toUpperCase() + " · " + s) : s
+                  if (!root.scopeIsDevice) return s
+                  var parts = [root.scopeLabel.toUpperCase()]
+                  if (sync.batteryTransport !== "") parts.push(sync.batteryTransport.toUpperCase())
+                  if (sync.batteryCapacity >= 0) parts.push(sync.batteryCapacity + "%")
+                  parts.push(s)
+                  return parts.join(" · ")
                 }
                 textFormat: Text.PlainText
                 color: Qt.darker(root.fg, 1.45)

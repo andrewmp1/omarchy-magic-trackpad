@@ -257,6 +257,80 @@ Item {
     onTriggered: if (devicesProc.running) devicesProc.signal(9)
   }
 
+  // ------------------------------------------------------------- device battery
+
+  // For the selected device scope only: its transport (from the /proc block
+  // this component already read) and, if a HID battery node matches its
+  // `U: Uniq`, the capacity + charging status. `find` lists the one directory
+  // whose name contains the uniq (argv array, no shell, uniq is validated to
+  // a MAC/hex shape first); its `uevent` is then read through BoundedRead.
+  // Purely informational — the panel never blocks on it.
+  property string batteryTransport: ""
+  property int batteryCapacity: -1
+  property string batteryStatus: ""
+  property string _batteryFor: ""
+  property string _batteryFindRaw: ""
+
+  function probeBattery(slug) {
+    batteryTransport = Model.deviceTransport(_procText, slug)
+    batteryCapacity = -1
+    batteryStatus = ""
+    _batteryFor = slug
+    if (batteryFindProc.running) batteryFindProc.signal(15)
+    var uniq = Model.deviceUniq(_procText, slug)
+    if (!uniq) return
+    _batteryFindRaw = ""
+    batteryFindProc.command = ["/usr/bin/find", "/sys/class/power_supply", "-maxdepth", "1",
+                               "-name", "*" + uniq + "*battery*", "-printf", "%f\n"]
+    batteryWatchdogTerm.restart()
+    batteryFindProc.running = true
+  }
+
+  Process {
+    id: batteryFindProc
+    stdout: SplitParser {
+      splitMarker: ""
+      onRead: function (data) {
+        if (root._batteryFindRaw.length + data.length <= 1024) root._batteryFindRaw += data
+      }
+    }
+    onExited: function (exitCode, exitStatus) {
+      batteryWatchdogTerm.stop()
+      batteryWatchdogKill.stop()
+      if (exitCode !== 0) return
+      var name = String(root._batteryFindRaw).split("\n")[0].trim()
+      if (!Model.isPowerSupplyName(name)) return
+      batteryReader.read("/sys/class/power_supply/" + name + "/uevent")
+    }
+  }
+
+  BoundedRead {
+    id: batteryReader
+    cap: 8192
+    onFinished: function (ok, overflow, absent, content) {
+      if (!ok) return
+      var b = Model.batteryFromUevent(content)
+      root.batteryCapacity = b.capacity
+      root.batteryStatus = b.status
+    }
+  }
+
+  Timer {
+    id: batteryWatchdogTerm
+    interval: root.termMs
+    repeat: false
+    onTriggered: {
+      if (batteryFindProc.running) batteryFindProc.signal(15)
+      batteryWatchdogKill.restart()
+    }
+  }
+  Timer {
+    id: batteryWatchdogKill
+    interval: root.killMs - root.termMs
+    repeat: false
+    onTriggered: if (batteryFindProc.running) batteryFindProc.signal(9)
+  }
+
   // -------------------------------------------------------------- live apply
 
   property var _queue: []

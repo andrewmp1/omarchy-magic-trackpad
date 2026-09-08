@@ -609,6 +609,65 @@ function touchpadDevices(hyprctlDevices, procInput) {
   return out
 }
 
+// The `/proc/bus/input/devices` block for a Hyprland device slug: return the
+// block's `U: Uniq=` (a MAC for a Bluetooth pad, a serial for USB) if it looks
+// like one, else "". Used to find the matching /sys/class/power_supply entry.
+function deviceUniq(procInput, slug) {
+  var b = _procBlockFor(procInput, slug)
+  if (!b) return ""
+  var m = b.match(/^U: Uniq=(.+)$/m)
+  if (!m) return ""
+  var u = m[1].trim().toLowerCase()
+  return /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/.test(u) || /^[0-9a-f]{4,40}$/.test(u) ? u : ""
+}
+
+// "Bluetooth" | "USB" | "" from the block's `I: Bus=` field.
+function deviceTransport(procInput, slug) {
+  var b = _procBlockFor(procInput, slug)
+  if (!b) return ""
+  var m = b.match(/^I: Bus=([0-9a-fA-F]+)/m)
+  if (!m) return ""
+  var bus = parseInt(m[1], 16)
+  if (bus === 0x5) return "Bluetooth"
+  if (bus === 0x3) return "USB"
+  return ""
+}
+
+function _procBlockFor(procInput, slug) {
+  var text = String(procInput || "")
+  if (!text || !isDeviceName(slug)) return ""
+  var blocks = text.split(/\n\s*\n/)
+  for (var i = 0; i < blocks.length && i < 256; i++) {
+    var mn = blocks[i].match(/^N: Name="(.*)"$/m)
+    if (mn && hyprSlug(mn[1]) === slug) return blocks[i]
+  }
+  return ""
+}
+
+// Parse a /sys/class/power_supply/<x>/uevent blob → { capacity, status }.
+// capacity is 0..100 or -1 (absent/garbage); status is a short bare word.
+function batteryFromUevent(text) {
+  var out = { capacity: -1, status: "" }
+  var lines = String(text || "").split("\n")
+  for (var i = 0; i < lines.length && i < 200; i++) {
+    var line = lines[i]
+    if (line.length > 200) continue
+    var mc = line.match(/^POWER_SUPPLY_CAPACITY=(\d{1,3})$/)
+    if (mc) {
+      var n = parseInt(mc[1], 10)
+      if (n >= 0 && n <= 100) out.capacity = n
+    }
+    var ms = line.match(/^POWER_SUPPLY_STATUS=([A-Za-z ]{1,20})$/)
+    if (ms) out.status = ms[1].replace(/[^A-Za-z]/g, "")
+  }
+  return out
+}
+
+// A power_supply node name is safe to drop into a /sys path.
+function isPowerSupplyName(name) {
+  return typeof name === "string" && /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/.test(name)
+}
+
 function _touchpadSlugs(procInput) {
   var slugs = {}
   var text = String(procInput || "")
@@ -681,6 +740,10 @@ if (typeof module !== "undefined") {
     isInherited: isInherited,
     deviceOverrideCount: deviceOverrideCount,
     summaryLine: summaryLine,
-    touchpadDevices: touchpadDevices
+    touchpadDevices: touchpadDevices,
+    deviceUniq: deviceUniq,
+    deviceTransport: deviceTransport,
+    batteryFromUevent: batteryFromUevent,
+    isPowerSupplyName: isPowerSupplyName
   }
 }
