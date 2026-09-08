@@ -63,6 +63,9 @@ Item {
     for (var i = 0; i < Model.TOUCHPAD_TOGGLES.length; i++)
       q.push({ key: Model.TOUCHPAD_TOGGLES[i].key, option: Model.TOUCHPAD_TOGGLES[i].option })
     q.push({ key: "scrollSpeed", option: Model.SCROLL_OPTION })
+    q.push({ key: "pointerSpeed", option: Model.POINTER_OPTION })
+    for (var j = 0; j < Model.ENUM_SETTINGS.length; j++)
+      q.push({ key: Model.ENUM_SETTINGS[j].key, option: Model.ENUM_SETTINGS[j].option })
     _refreshQueue = q
     _pending = {}
     _refreshNext()
@@ -90,8 +93,15 @@ Item {
         if (isFinite(d) && d < bestD) { bestD = d; best = Model.SCROLL_STOPS[s].key }
       }
       _pending[key] = best
+    } else if (key === "pointerSpeed") {
+      // raw sensitivity float; effectivePointer() snaps it to a stop
+      _pending[key] = isFinite(Number(v)) ? Number(v) : null
+    } else if (Model.enumSetting(key)) {
+      // raw Lua string; effectiveEnum() maps it back to a value key
+      _pending[key] = (typeof v === "string") ? v : null
     } else {
-      _pending[key] = (v === true || v === false) ? v : false
+      // bool for most, int (0/1) for drag_lock / drag_3fg
+      _pending[key] = (v === true) || (typeof v === "number" && v > 0)
     }
   }
 

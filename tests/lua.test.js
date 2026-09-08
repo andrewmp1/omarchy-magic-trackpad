@@ -68,6 +68,11 @@ const SHAPES = {
     devices: {
       "apple-inc.-magic-trackpad": { touchpad: {}, pointerSpeed: "slowest", scrollMethod: "2fg", accelProfile: "adaptive" }
     }
+  },
+  "v2: drag lock, three-finger drag, two-finger-tap target": {
+    version: 2,
+    global: { touchpad: { dragLock: true, threeFingerDrag: false }, tapButtonMap: "middle" },
+    devices: { "apple-inc.-magic-trackpad": { touchpad: { dragLock: true }, tapButtonMap: "right" } }
   }
 }
 

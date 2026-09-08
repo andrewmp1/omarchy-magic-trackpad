@@ -41,15 +41,19 @@ test("getoption -j returns a shape parseGetOption understands", opts, () => {
   assert.ok(v === true || v === false, `unexpected getoption JSON: ${raw}`)
 })
 
+// drag_lock / drag_3fg report back as int (0/1); the rest as bool. Same
+// coercion Model.effectiveToggle applies.
+const isOn = (v) => v === true || (typeof v === "number" && v > 0)
+
 for (const t of M.TOUCHPAD_TOGGLES) {
   test(`live: ${t.field} flips via the plugin's exact command`, opts, () => {
-    const before = getOpt(t.option) === true
+    const before = isOn(getOpt(t.option))
     const target = !before
     try {
       const lua = M.toggleEvalArgs(t.field, target)[2]
       const r = evalLua(lua)
       assert.equal(r.out, "ok", `hyprctl eval failed: ${r.err || r.out}`)
-      assert.equal(getOpt(t.option), target, `${t.option} did not change after ${lua}`)
+      assert.equal(isOn(getOpt(t.option)), target, `${t.option} did not change after ${lua}`)
     } finally {
       evalLua(M.toggleEvalArgs(t.field, before)[2])
     }

@@ -341,6 +341,32 @@ test("effectiveToggle cascades device -> global -> live (2-arg form = global)", 
   // legacy 3-arg form still means global
   assert.equal(M.effectiveToggle({}, { naturalScroll: true }, "naturalScroll"), true)
   assert.equal(M.effectiveToggle({ version: 2, global: { touchpad: { naturalScroll: false } } }, { naturalScroll: true }, "naturalScroll"), false)
+  // drag_lock / drag_3fg read back as int — a live value > 0 counts as on
+  assert.equal(M.effectiveToggle({}, { dragLock: 1 }, "dragLock"), true)
+  assert.equal(M.effectiveToggle({}, { dragLock: 0 }, "dragLock"), false)
+})
+
+test("commit B catalogue: drag lock, three-finger drag, two-finger-tap target", () => {
+  const keys = M.TOUCHPAD_TOGGLES.map((t) => t.key)
+  assert.ok(keys.includes("dragLock"))
+  assert.ok(keys.includes("threeFingerDrag"))
+  const dl = M.TOUCHPAD_TOGGLES.find((t) => t.key === "dragLock")
+  assert.equal(dl.field, "drag_lock")
+  assert.equal(dl.option, "input:touchpad:drag_lock")
+
+  const tbm = M.ENUM_SETTINGS.find((e) => e.key === "tapButtonMap")
+  assert.ok(tbm, "tapButtonMap enum missing")
+  assert.equal(tbm.level, "touchpad")
+  assert.equal(tbm.section, "touchpad")
+  assert.equal(M.enumValue("tapButtonMap", "right"), "lrm")
+  assert.equal(M.enumValue("tapButtonMap", "middle"), "lmr")
+
+  // tap_button_map is a touchpad-level key: nests inside the touchpad table
+  const plan = M.applyPlan({ version: 2, global: { touchpad: {}, tapButtonMap: "middle" }, devices: {} })
+  assert.equal(plan[0][2], 'hl.config({ input = { touchpad = { tap_button_map = "lmr" } } })')
+  // …and stays flat in a device block
+  const dplan = M.applyPlan({ version: 2, global: { touchpad: {} }, devices: { "logitech-m720": { touchpad: {}, tapButtonMap: "right" } } })
+  assert.equal(dplan[0][2], 'hl.device({ name = "logitech-m720", tap_button_map = "lrm" })')
 })
 
 test("effectiveScroll cascades device -> global -> live -> normal", () => {

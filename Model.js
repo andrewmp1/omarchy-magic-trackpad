@@ -19,12 +19,17 @@
 // `option` is the `getoption` path (underscores; Hyprland accepts them).
 // `field` is the key inside `hl.config{ input = { touchpad = { ... } } }` and,
 // identically, inside `hl.device{ name = ..., ... }`.
+// Every entry is a boolean toggle. `drag_lock` / `drag_3fg` read back from
+// `getoption` as an int (0/1); the plugin still writes `true`/`false` and
+// Hyprland coerces (verified), and the read side coerces `> 0` → true.
 var TOUCHPAD_TOGGLES = [
   { key: "tapToClick",         field: "tap_to_click",             option: "input:touchpad:tap_to_click",             label: "Tap to click",          help: "Tap the pad to click without pressing down." },
   { key: "twoFingerRight",     field: "clickfinger_behavior",     option: "input:touchpad:clickfinger_behavior",     label: "Two-finger right-click", help: "Two fingers = right click, three = middle. Off uses corner zones." },
   { key: "naturalScroll",      field: "natural_scroll",           option: "input:touchpad:natural_scroll",           label: "Natural scroll",        help: "Content follows the fingers, like a phone." },
   { key: "disableWhileTyping", field: "disable_while_typing",      option: "input:touchpad:disable_while_typing",     label: "Disable while typing",   help: "Ignore the pad for a moment after a keypress." },
   { key: "tapAndDrag",         field: "tap_and_drag",             option: "input:touchpad:tap_and_drag",             label: "Tap and drag",          help: "Tap-tap-hold to start dragging." },
+  { key: "dragLock",           field: "drag_lock",                option: "input:touchpad:drag_lock",                label: "Drag lock",             help: "Keep dragging through a brief finger lift." },
+  { key: "threeFingerDrag",    field: "drag_3fg",                 option: "input:touchpad:drag_3fg",                 label: "Three-finger drag",     help: "Move a window with three fingers." },
   { key: "middleClickPaste",   field: "middle_button_emulation",  option: "input:touchpad:middle_button_emulation",  label: "Middle-click emulation", help: "Left + right together acts as a middle click." }
 ]
 
@@ -78,6 +83,15 @@ var ENUM_SETTINGS = [
     values: [
       { key: "2fg",  lua: "2fg",  label: "Two-finger" },
       { key: "edge", lua: "edge", label: "Edge" }
+    ]
+  },
+  {
+    key: "tapButtonMap", field: "tap_button_map", level: "touchpad", section: "touchpad",
+    option: "input:touchpad:tap_button_map", label: "Two-finger tap",
+    help: "Whether a two-finger tap is a right-click or a middle-click.",
+    values: [
+      { key: "right",  lua: "lrm", label: "Right" },
+      { key: "middle", lua: "lmr", label: "Middle" }
     ]
   }
 ]
@@ -445,7 +459,8 @@ function effectiveToggle(cfg, live, scopeOrKey, key) {
   var gv = c.global.touchpad[k]
   if (gv === true || gv === false) return gv
   var l = (live && typeof live === "object") ? live[k] : undefined
-  return l === true
+  // Live values are bool for most options, int (0/1) for drag_lock / drag_3fg.
+  return l === true || (typeof l === "number" && l > 0)
 }
 
 // Back-compatible: effectiveScroll(cfg, live) means the global scope.

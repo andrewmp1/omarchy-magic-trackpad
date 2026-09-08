@@ -55,6 +55,15 @@ BASE="$(scope_row_count)"          # 0 or 1 — nav offset to the first toggle r
 DEV="$(FIRST_DEVICE)"
 say "scope row present: $BASE   first touchpad: ${DEV:-<none>}"
 
+# Keyboard-cursor index of a row, computed from Model.js so adding rows never
+# breaks the nav math (see tests/navindex.js).
+navidx() { node "$REPO/tests/navindex.js" "$BASE" "$@"; }
+IDX_TAP="$(navidx toggle tapToClick)"
+IDX_NATURAL="$(navidx toggle naturalScroll)"
+IDX_SCROLL="$(navidx scroll)"
+IDX_POINTER="$(navidx pointer)"
+say "nav indices: tap=$IDX_TAP natural=$IDX_NATURAL scroll=$IDX_SCROLL pointer=$IDX_POINTER"
+
 # NB: `.bool // empty` is wrong — jq treats `false` as absent, so a toggle
 # flipping to false would read as "unchanged". Emit the literal instead.
 getb() { hyprctl getoption -j "input:touchpad:$1" | jq -r 'if has("bool")  then (.bool|tostring)  else "" end'; }
@@ -89,7 +98,19 @@ open_panel() {
   press Down          # prime: cursor -> active, index 0
   return 0
 }
-nav()      { local n=$1; while [ "$n" -gt 0 ]; do press Down; n=$((n - 1)); done; }
+# The cursor list wraps, so reach a target index by whichever direction is
+# shorter — a long one-way run of `wtype` keystrokes is where the panel drops
+# focus or loses a press.
+NAV_TOTAL="$(navidx count)"
+nav() {
+  local target="$1" n up
+  up=$(( NAV_TOTAL - target ))
+  if [ "$target" -le "$up" ]; then
+    n="$target"; while [ "$n" -gt 0 ]; do press Down; n=$((n - 1)); done
+  else
+    n="$up";     while [ "$n" -gt 0 ]; do press Up;   n=$((n - 1)); done
+  fi
+}
 activate() { press space; sleep 0.6; }
 
 # --- snapshot everything we might touch, restore on exit ---------------------
@@ -125,8 +146,8 @@ rm -f "$CFG" "$LUA"
 # --- test 1: first toggle row (Tap to click) toggles on activate ----------
 b0="$(getb tap_to_click)"
 open_panel || skip "panel would not open via IPC (bar widget idle?)"
-nav "$BASE"                          # step past the SCOPE row if present
-activate                             # first toggle -> setToggle(tap_to_click)
+nav "$IDX_TAP"                        # -> Tap to click
+activate                             # setToggle(tap_to_click)
 a0="$(getb tap_to_click)"
 close_panel
 if [ -z "$a0" ] || [ "$a0" = "$b0" ]; then
@@ -142,7 +163,7 @@ fi
 setb tap_to_click "${ORIG[tap_to_click]:-true}"; rm -f "$CFG" "$LUA"
 b2="$(getb natural_scroll)"
 open_panel
-nav $((BASE + 2)); activate           # -> natural_scroll (3rd toggle) -> setToggle
+nav "$IDX_NATURAL"; activate            # -> natural scroll -> setToggle
 a2="$(getb natural_scroll)"
 close_panel
 [ -n "$a2" ] && [ "$a2" != "$b2" ] \
@@ -153,7 +174,7 @@ close_panel
 rm -f "$CFG" "$LUA"
 b3="$(getf scroll_factor)"
 open_panel
-nav $((BASE + 6)); activate            # past 6 toggles -> the scroll stop -> cycleScroll()
+nav "$IDX_SCROLL"; activate             # -> the scroll stop -> cycleScroll()
 a3="$(getf scroll_factor)"
 close_panel
 if [ -n "$a3" ] && [ "$a3" != "$b3" ]; then
@@ -166,7 +187,7 @@ fi
 #     change on disk so test 4 still has an hl.config to reload.
 pb="$(hyprctl getoption -j input:sensitivity | jq -r 'if has("float") then (.float|tostring) else "" end')"
 open_panel
-nav $((BASE + 8)); activate            # scope + 6 toggles + scroll + scrollMethod -> pointer
+nav "$IDX_POINTER"; activate            # -> the POINTER stop -> cyclePointer()
 pa="$(hyprctl getoption -j input:sensitivity | jq -r 'if has("float") then (.float|tostring) else "" end')"
 close_panel
 if [ -n "$pa" ] && [ "$pa" != "$pb" ]; then
@@ -202,7 +223,7 @@ if [ "$BASE" = "1" ] && [ -n "$DEV" ]; then
   sleep 0.8                             # let the panel-open device refresh settle first
   activate                              # cursor at index 0 = SCOPE row -> cycleScope() -> the device
   sleep 0.8
-  nav $((BASE + 2)); activate            # -> natural_scroll row, in the DEVICE scope
+  nav "$IDX_NATURAL"; activate            # -> natural scroll row, in the DEVICE scope
   sleep 0.8
   close_panel
   ok5=1
