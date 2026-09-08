@@ -8,11 +8,11 @@ in the sibling `magic-trackpad-haptics` repo for the full design.
 
 | File | Role |
 | --- | --- |
-| `Model.js` | All pure logic: the setting catalogue, `hyprctl getoption` parsing, v1→v2 config migration, touchpad detection (`touchpadDevices`), device-name validation (`isDeviceName`, anchored, refuse-not-repair), the scope cascade (`effectiveToggle`/`effectiveScroll(cfg, live, scope, key)`), the apply plan (`hl.config` + per-device `hl.device`), the generated Lua, the loader-line guard. No QML imports — `node --test tests/model.test.js` runs it directly. |
+| `Model.js` | All pure logic: `TOUCHPAD_TOGGLES` / `SCROLL_STOPS` / `POINTER_STOPS` / `ENUM_SETTINGS` catalogues, `getoption` parsing (incl. the `"[[EMPTY]]"` sentinel → null), v1→v2 config migration, touchpad detection (`touchpadDevices`), `deviceUniq` / `deviceTransport` / `batteryFromUevent`, device-name validation (`isDeviceName`, anchored, refuse-not-repair), the scope cascade (`effectiveToggle` / `effectiveScroll` / `effectivePointer` / `effectiveEnum`), the apply plan (`hl.config` two-level + per-device `hl.device`; `applyPlanForDevice` for one), the generated Lua, the loader-line guard. No QML imports — `node --test tests/model.test.js` runs it directly. |
 | `ConfigStore.qml` | `~/.config/omarchy/magic-trackpad.json` on disk + in memory, normalized on every read. Source of truth. Reads via `BoundedRead`; its `FileView` is watcher + writer only. |
-| `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"` / `"hl.device{...}"`), the read-back (bounded `/usr/bin/hyprctl getoption -j`, argv arrays), touchpad enumeration (`hyprctl devices -j` + a `BoundedRead` of `/proc/bus/input/devices` → `touchpadDevices`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua` (installed fail-closed on the first setting change). |
+| `HyprSync.qml` | Config → live Hyprland (`hyprctl eval "hl.config{...}"` / `"hl.device{...}"`), the read-back (bounded `/usr/bin/hyprctl getoption -j`, argv arrays — now covers `input:sensitivity` + every enum), touchpad enumeration (`hyprctl devices -j` + a `BoundedRead` of `/proc/bus/input/devices`), the selected pad's battery (`/usr/bin/find` on `/sys/class/power_supply` by `U: Uniq`, then a `BoundedRead` of its `uevent`), and the managed `~/.config/hypr/omarchy-magic-trackpad.lua` + one guarded `dofile` loader line in `hyprland.lua` (installed fail-closed on the first setting change). Every child process has its own TERM/KILL watchdog. |
 | `BoundedRead.qml` | The one file-read primitive: `/usr/bin/dd` as a fixed argv array with `iflag=nofollow,nonblock,count_bytes`, byte cap + overflow refusal, ENOENT distinguished from refusal, TERM/KILL watchdog. **The exit code arrives only as the `onExited(exitCode, …)` argument** — Quickshell 0.3.1's `Process` has no `exitCode` property. |
-| `BarWidget.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. A `scope` (`"global"` or a device slug) drives every toggle/scroll row; the SCOPE picker is a `ButtonGroup` (≤3 options) or a `Dropdown`, and appears only when a touchpad is detected. "Reset to Global" uses a `ConfirmDialog` driven through the panel's own key signals. |
+| `BarWidget.qml` | The bar button + popup. Entry point (`entryPoints.barWidget`). Owns its own store + sync; assumes no `Service.qml` is running. A `scope` (`"global"` or a device slug) drives every row. Content is in a `QQC.ScrollView` (`QtQuick.Controls` imported **as QQC** so its `ButtonGroup` can't shadow `qs.Ui`'s); the cursor scrolls the focused row into view. The SCOPE picker is a `ButtonGroup` (≤3 options) or a `Dropdown`. `EnumRow` (an inline `component`) renders each `ENUM_SETTINGS` entry. "Reset to Global" and "Disable this touchpad" each use a `ConfirmDialog` driven through the panel's own key signals. |
 
 The haptics backend (`magic-haptic`, the udev setup) is deliberately **not**
 vendored here: it is root-capable (sudo, systemd, udev, raw hidraw) and
@@ -25,23 +25,31 @@ the marketplace security baseline free of `privilege` / `service-management`
 ## Scope: five phases
 
 Release history so far: **v0.1.0** Level 1; **v0.2.0** marketplace
-security-review hardening (no user-facing change); **v0.3.0** per-device
-overrides (this branch — see the CHANGELOG `[Unreleased]`).
+security-review hardening (no user-facing change); **v0.3.0** the stacked
+feature set below (this branch — see the CHANGELOG `[Unreleased]`).
 
 1. **v0.1 — Level 1.** *Global* libinput touchpad options only. No daemon, no
    permissions. Finger swipes were cut before release — see the gesture note
    below.
-2. **v0.3 — Per-device overrides (this branch).** A SCOPE picker; a device
-   scope writes a Hyprland `device` block (`hl.device{ name = <slug> }`)
-   instead of the global `input.touchpad` section, so a laptop pad and an
-   external Magic Trackpad can differ. `Model.js` grew a device dimension;
-   `HyprSync` enumerates touchpads and emits `hl.device` blocks in the apply
-   plan and the managed `.lua`. **No per-device read-back** — `hyprctl
-   getoption "device:<name>:…"` is "no such option", so a device scope's unset
-   options fall through to Global (which keeps the v0.1 `getoption` fallback).
-   A runtime `hl.device` override is **not cleared by `hyprctl reload`**, so
-   "Reset to Global" re-applies Global's values to the device explicitly and
-   also drops it from the document.
+2. **v0.3 — per-device overrides + more settings + device intelligence (this
+   branch).**
+   - **Scope picker** — a device scope writes a Hyprland `device` block
+     (`hl.device{ name = <slug> }`) instead of the global `input` section, so
+     a laptop pad and an external Magic Trackpad can differ. **No per-device
+     read-back** — `hyprctl getoption "device:<name>:…"` is "no such option",
+     so a device scope's unset options fall through to Global (which keeps the
+     v0.1 `getoption` fallback). A runtime `hl.device` override is **not
+     cleared by `hyprctl reload`**, so "Reset to Global" re-applies Global's
+     values to the device explicitly and also drops it from the document.
+   - **More settings** — pointer speed / acceleration / scroll method
+     (`input`-level, not `input.touchpad`), drag lock / three-finger drag
+     (`int` read-back), two-finger-tap target.
+   - **Disable this touchpad** — a device-only `enabled: false` that
+     short-circuits every other key for that pad; guarded by a confirm dialog.
+   - **Device intelligence** — battery + transport in the header; a
+     configured pad's overrides are re-pushed on (re)connect
+     (`applyPlanForDevice`), since there is no device-hotplug event in
+     `Quickshell.Hyprland`.
 3. **v0.4 — Finger swipes.** See the gesture note below.
 4. **Haptics.** Apple Magic Trackpad Taptic Engine strength via `magic-haptic`
    (vendored from the research repo when this phase lands) + a udev
@@ -79,6 +87,26 @@ overrides (this branch — see the CHANGELOG `[Unreleased]`).
   `proc.exitCode` yields `undefined`; `undefined === 0` is false, so a guard
   like `ok = exitCode === 0` silently fails every time. This bit `BoundedRead`
   (every read looked "refused") — fixed by taking the handler argument.
+- **`sensitivity` / `accel_profile` / `scroll_method` are `input`-level, not
+  `input.touchpad`.** In a global `hl.config` they nest beside the `touchpad`
+  table: `hl.config({ input = { sensitivity = …, touchpad = { … } } })`. In an
+  `hl.device` block everything is flat. `configLua(touchpadAssign,
+  inputAssign)` handles both; `ENUM_SETTINGS[].level` (`"input"` |
+  `"touchpad"`) drives it. Per-device they all work as flat `hl.device` keys.
+- **Hyprland reports an unset string option as the literal `"[[EMPTY]]"`.**
+  `parseGetOption` maps that (and `""`) to null. `drag_lock` / `drag_3fg`
+  read back as `int` (0/1), not bool — coerce `> 0` (done in
+  `effectiveToggle`, `HyprSync._absorb`, and the contract test's `isOn`).
+- **`import QtQuick.Controls` shadows `qs.Ui.ButtonGroup`** with the abstract
+  `QtQuick.Controls.ButtonGroup`. Import it `as QQC` and use `QQC.ScrollView`
+  / `QQC.ScrollBar` so the kit's components resolve.
+- **Battery lookup:** `/sys/class/power_supply/<node>` is a symlink whose
+  *name* carries the `U: Uniq` MAC with an unpredictable `-NNN` suffix, so
+  `find -maxdepth 1 -name "*<uniq>*battery*"` locates it, then a `BoundedRead`
+  of `<node>/uevent` (the final `uevent` component is a real file, so
+  `O_NOFOLLOW` is fine even though the parent is a link). Validate `uniq`
+  (MAC/hex) before the `find` argv and the found name
+  (`Model.isPowerSupplyName`) before the path.
 - **The config document is the source of truth, not Hyprland.** `getoption`
   is only read to *show* the state of an option the user hasn't set yet
   (`Model.effectiveToggle`). Once set, the JSON wins.

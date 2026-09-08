@@ -320,12 +320,16 @@
     <table>
       <tr><td>Tap to click</td><td>tap the pad instead of pressing down</td></tr>
       <tr><td>Two-finger right-click</td><td>2 fingers → right, 3 → middle <span class="k">clickfinger_behavior</span></td></tr>
+      <tr><td>Two-finger tap</td><td>Right or Middle <span class="k">tap_button_map</span></td></tr>
       <tr><td>Natural scroll</td><td>content follows the fingers</td></tr>
       <tr><td>Disable while typing</td><td>ignore the pad briefly after a keypress</td></tr>
-      <tr><td>Tap and drag</td><td>tap-tap-hold to start a drag</td></tr>
+      <tr><td>Tap and drag · Drag lock</td><td>tap-tap-hold to drag; keep dragging through a brief lift</td></tr>
+      <tr><td>Three-finger drag</td><td>move a window with three fingers <span class="k">drag_3fg</span></td></tr>
       <tr><td>Middle-click emulation</td><td>left + right together → middle</td></tr>
-      <tr><td>Scroll speed</td><td>Slow · Normal · Fast <span class="k">scroll_factor 0.2 / 0.4 / 0.8</span></td></tr>
-      <tr><td>Scope</td><td>Global, or a per-touchpad override <span class="k">hl.device</span> — natural scroll on the laptop pad but off on an external Magic Trackpad, say. A device scope inherits every option it hasn't overridden; <em>Reset to Global</em> clears it.</td></tr>
+      <tr><td>Scroll speed · method</td><td>Slow · Normal · Fast <span class="k">scroll_factor</span>; Two-finger or Edge</td></tr>
+      <tr><td>Pointer speed · acceleration</td><td>5 steps <span class="k">sensitivity</span>; Adaptive or Flat <span class="k">accel_profile</span></td></tr>
+      <tr><td>Disable this touchpad</td><td>turn a specific pad off entirely <span class="k">hl.device({ enabled = false })</span></td></tr>
+      <tr><td>Scope</td><td>Global, or a per-touchpad override <span class="k">hl.device</span> — natural scroll on the laptop pad but off on an external Magic Trackpad, say. A device scope inherits what it hasn't overridden; the header shows that pad's transport and battery. <em>Reset to Global</em> clears it.</td></tr>
     </table>
   </section>
 

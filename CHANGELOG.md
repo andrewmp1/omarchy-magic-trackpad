@@ -28,7 +28,31 @@ hardening.)
   (`^[a-z0-9][a-z0-9._-]{0,127}$`) — refused, never repaired.
 - Config document is now v2: `{ version: 2, global: {…}, devices: { "<slug>":
   {…} } }`. A v0.1 document is migrated to `global` on first load with nothing
-  lost; `ConfigStore` always writes v2.
+  lost; `ConfigStore` always writes v2. New settings are optional keys — no
+  further schema bump.
+- **Pointer speed** (5-stop `sensitivity`), **pointer acceleration**
+  (Adaptive / Flat), and **scroll method** (Two-finger / Edge), per scope.
+  These are `input`-level keys, so a global `hl.config` now nests them beside
+  the `touchpad` table: `hl.config({ input = { sensitivity = …, touchpad =
+  { … } } })`.
+- **Drag lock**, **Three-finger drag** (`drag_lock` / `drag_3fg` — read back
+  as int, coerced), and **Two-finger tap → Right / Middle** (`tap_button_map`).
+- **Disable this touchpad** — a device scope only, guarded by a confirm
+  dialog; writes `enabled: false` / `hl.device({ name, enabled = false })`,
+  dims the settings, and shows "disabled" in the hero. Re-enabling drops the
+  override (inherits Global again).
+- **Battery + transport** in the panel header for the selected device —
+  transport from `/proc/bus/input/devices` (`I: Bus=`), battery from
+  `/sys/class/power_supply/<node>/uevent` located by the device's `U: Uniq`
+  MAC. Read-only, no root; absent just means no percentage.
+- A configured device's overrides are re-pushed when it (re)connects
+  mid-session (`Model.applyPlanForDevice`), covering the window before
+  Hyprland re-sources the managed `.lua`.
+- Read-back now covers `input:sensitivity` and every enum option, so an
+  unconfigured control shows the value actually in effect rather than always
+  the libinput default.
+- The panel content is in a `ScrollView` — the keyboard cursor scrolls the
+  focused row into view.
 
 ### Fixed
 
