@@ -56,6 +56,18 @@ device access belongs to a later phase — see the roadmap in the README.
 | `scripts/check.sh` | runs every layer |
 | `bin/magic-haptic`, `setup.sh` | staged for the haptics phase; unused in v0.1 |
 
+## Cutting a release (maintainers)
+
+1. Land the changes; add them under `## [Unreleased]` in `CHANGELOG.md`.
+2. **Actions → release → Run workflow**, enter the version (`0.2.0`, no `v`).
+   Tick *dry_run* first if you want to see the diff and notes in the log.
+3. The workflow runs the portable test layers, bumps `manifest.json` /
+   `package.json`, rolls `[Unreleased]` into `## [x.y.z] — <date>`, commits,
+   tags `vx.y.z`, pushes to `main`, and creates the GitHub Release with a
+   source tarball.
+
+Local preview: `scripts/release.sh 0.2.0 --dry-run`.
+
 ## Code of conduct
 
 Be decent. Assume good faith. That's it.

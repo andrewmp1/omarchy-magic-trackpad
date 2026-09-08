@@ -17,9 +17,11 @@ Checked against <https://plugins.omarchy.org/publish.html>.
       ```sh
       omarchy plugin validate .
       ```
-- [ ] Tag the release commit (`git tag v0.1.0 && git push --tags`) — the
-      automated check validates the current commit; a tag makes the listed
-      version reproducible.
+- [ ] Cut the release: **Actions → release → Run workflow**, enter the
+      version (e.g. `0.1.0`). It bumps `manifest.json` / `package.json`, rolls
+      `CHANGELOG.md`'s `[Unreleased]` into a dated section, tags `v<version>`,
+      and publishes the GitHub Release. (`scripts/release.sh <v> --dry-run`
+      previews it locally.)
 - [ ] Turn on GitHub Pages (Settings → Pages → Source: **GitHub Actions**) so
       the `Website` link in the README resolves.
 
