@@ -60,8 +60,7 @@ Marketplace security-review hardening (skill: omarchy-plugin-security):
   the repository verbatim into the user's plugin directory — so a root-level
   agent file is a prompt-injection surface. `docs/` is not auto-loaded.
 - README: new "Security boundary" section documenting the plugin's exact
-  footprint (what it runs, writes, and never touches); dev-install
-  instructions no longer include a clone step.
+  footprint (what it runs, writes, and never touches).
 
 ## [0.1.0] — 2026-09-07
 

@@ -59,7 +59,8 @@ glyph in the bar to open the panel.
 <summary>Install from a local checkout (development)</summary>
 
 ```sh
-ln -s "$PWD" ~/.config/omarchy/plugins/andrewmp1.magic-trackpad
+git clone https://github.com/andrewmp1/omarchy-magic-trackpad.git
+ln -s "$PWD/omarchy-magic-trackpad" ~/.config/omarchy/plugins/andrewmp1.magic-trackpad
 omarchy restart shell
 omarchy plugin enable andrewmp1.magic-trackpad
 ```
